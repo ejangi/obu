@@ -1,0 +1,42 @@
+# Copy to config.toml and replace the two paths with the mounted drives.
+# Credentials and crypt passwords live only in rclone's configuration.
+remote = "obu-crypt:"
+# Leave host blank to use this computer's hostname; set it to keep names stable.
+host = ""
+state_dir = "~/.local/state/obu"
+verify = true
+
+# Primary 1 TB drive.
+[sources.primary]
+path = "/media/REPLACE_ME/primary"
+filters = ["common", "primary"]
+
+# Secondary 2 TB drive.
+[sources.secondary]
+path = "/media/REPLACE_ME/secondary"
+filters = ["common", "secondary"]
+
+# Rules use rclone's filter syntax and run in the listed order. Keep any
+# specific re-inclusions above an exclusion that would otherwise match them.
+[filters.common]
+rules = [
+  "- .DS_Store",
+  "- Thumbs.db",
+  "- **/.Trash/**",
+  "- **/.cache/**",
+  "- **/node_modules/**",
+  "- **/__pycache__/**",
+  "- **/*.pyc",
+  "- **/*.tmp",
+  "- **/*~",
+]
+
+[filters.primary]
+rules = [
+  # "- /Downloads/rebuildable/**",
+]
+
+[filters.secondary]
+rules = [
+  # "- /Scratch/**",
+]

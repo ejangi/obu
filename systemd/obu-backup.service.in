@@ -1,0 +1,10 @@
+[Unit]
+Description=OBU encrypted backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 @@PROJECT_ROOT@@/scripts/backup.py all
+Nice=10
+IOSchedulingClass=best-effort

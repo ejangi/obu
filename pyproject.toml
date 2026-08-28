@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "obu-backup"
+version = "0.1.0"
+description = "Safe, scheduled rclone-crypt backups"
+requires-python = ">=3.11"
+
+[project.scripts]
+obu-backup = "obu.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
