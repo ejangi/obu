@@ -36,25 +36,55 @@ rules = ["- /Downloads/rebuildable/**"]
 class BackupCliTests(unittest.TestCase):
     """The CLI's print plan is the supported seam for reviewing a backup."""
 
-    def run_cli(self, config: Path) -> subprocess.CompletedProcess[str]:
+    def run_cli(self, config: Path, *command: str) -> subprocess.CompletedProcess[str]:
         environment = os.environ | {"PYTHONPATH": str(ROOT / "src")}
         return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "obu",
-            "--config",
-            str(config),
-            "backup",
-            "primary",
-            "--print-command",
-        ],
+        [sys.executable, "-m", "obu", "--config", str(config), *(command or ("backup", "primary", "--print-command"))],
         cwd=ROOT,
         env=environment,
         capture_output=True,
         text=True,
         check=False,
         )
+
+    def run_root_cli(self, *command: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(ROOT / "obu"), *command],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_help_aliases_use_the_specific_command_documentation(self) -> None:
+        for help_option in ("--help", "-h", "-?"):
+            with self.subTest(help_option=help_option):
+                root_help = self.run_root_cli(help_option)
+                logs_help = self.run_root_cli("logs", help_option)
+
+                self.assertEqual(root_help.returncode, 0, root_help.stderr)
+                self.assertIn("{backup,all,restore,status,logs,install}", root_help.stdout)
+                self.assertEqual(logs_help.returncode, 0, logs_help.stderr)
+                self.assertIn("Show completed rclone output or follow a live run log.", logs_help.stdout)
+                self.assertIn("--source", logs_help.stdout)
+                self.assertIn("--tail", logs_help.stdout)
+                self.assertNotIn("back up one configured source", logs_help.stdout)
+
+    def test_backup_help_describes_the_source_names_and_optional_path(self) -> None:
+        result = self.run_root_cli("backup", "--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SOURCE [PATH]", result.stdout)
+        self.assertIn("primary", result.stdout)
+        self.assertIn("secondary", result.stdout)
+
+    def test_restore_help_describes_its_uppercase_positional_arguments(self) -> None:
+        result = self.run_root_cli("restore", "--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SOURCE TARGET", result.stdout)
+        self.assertIn("configured source name", result.stdout)
+        self.assertIn("existing empty directory", result.stdout)
 
     def test_backup_prints_a_copy_plan_with_version_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -68,11 +98,46 @@ class BackupCliTests(unittest.TestCase):
         self.assertEqual(command[3], "obu-crypt:hosts/test-host/primary/current")
         self.assertIn("--backup-dir", command)
         self.assertIn("obu-crypt:hosts/test-host/primary/history/", command[command.index("--backup-dir") + 1])
+        self.assertIn("--links", command)
+        self.assertEqual(command[command.index("--log-level") + 1], "ERROR")
+        self.assertEqual(command[command.index("--stats") + 1], "30s")
+        self.assertIn("--stats-one-line", command)
+        self.assertEqual(command[command.index("--stats-log-level") + 1], "ERROR")
+        self.assertEqual(plan["verification_command"][:2], ["rclone", "cryptcheck"])
+        self.assertIn("--one-way", plan["verification_command"])
+        self.assertEqual(plan["verification_command"][plan["verification_command"].index("--stats") + 1], "30s")
         self.assertNotIn("--filter-from", command)
         self.assertEqual(
             [command[index + 1] for index, item in enumerate(command) if item == "--filter"],
             ["- **/.cache/**", "- **/*.tmp", "- /Downloads/rebuildable/**"],
         )
+
+    def test_scoped_backup_preserves_the_path_below_the_drive_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            result = self.run_cli(
+                config,
+                "backup",
+                "primary",
+                "/data/primary/Wallpapers",
+                "--print-command",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan["command"][2:4], ["/data/primary/Wallpapers", "obu-crypt:hosts/test-host/primary/current/Wallpapers"])
+        self.assertIn("obu-crypt:hosts/test-host/primary/history/", plan["command"][plan["command"].index("--backup-dir") + 1])
+        self.assertTrue(plan["command"][plan["command"].index("--backup-dir") + 1].endswith("/Wallpapers"))
+
+    def test_progress_requests_rclone_live_progress_for_copy_and_check(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            result = self.run_cli(config, "backup", "primary", "--progress", "--print-command")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        self.assertIn("--progress", plan["command"])
+        self.assertIn("--progress", plan["verification_command"])
 
 
     def test_plain_remote_is_rejected_before_a_backup_can_run(self) -> None:
@@ -111,3 +176,177 @@ class BackupCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["command"][:3], ["rclone", "copy", "obu-crypt:hosts/test-host/primary/current"])
+
+    def test_scoped_restore_reads_from_the_matching_backup_subdirectory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            target = Path(directory) / "recovery"
+            target.mkdir()
+            environment = os.environ | {"PYTHONPATH": str(ROOT / "src")}
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "obu",
+                    "--config",
+                    str(config),
+                    "restore",
+                    "primary",
+                    str(target),
+                    "--path",
+                    "/data/primary/Wallpapers",
+                    "--print-command",
+                ],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["command"][:3],
+            ["rclone", "copy", "obu-crypt:hosts/test-host/primary/current/Wallpapers"],
+        )
+
+    def test_logs_tails_the_latest_completed_run_for_a_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            (runs / "20260101T010101000000Z-primary.json").write_text(
+                json.dumps(
+                    {
+                        "finished_at": "2026-01-01T01:01:01+00:00",
+                        "source": "primary",
+                        "returncode": 1,
+                        "stderr": "first line\nsecond line\nlast line\n",
+                    }
+                )
+            )
+            result = self.run_cli(config, "logs", "--source", "primary", "--tail", "2")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("source=primary", result.stdout)
+        self.assertNotIn("first line", result.stdout)
+        self.assertIn("second line", result.stdout)
+        self.assertIn("last line", result.stdout)
+
+    def test_logs_watch_tails_the_latest_matching_live_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            (runs / "20260101T010101000000Z-primary.log").write_text("first line\nsecond line\nlast line\n")
+            environment = os.environ | {"PYTHONPATH": str(ROOT / "src")}
+            result = subprocess.run(
+                ["timeout", "0.2s", sys.executable, "-m", "obu", "--config", str(config), "logs", "--watch", "--source", "primary", "--tail", "2"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 124, result.stderr)
+        self.assertNotIn("first line", result.stdout)
+        self.assertIn("second line", result.stdout)
+        self.assertIn("last line", result.stdout)
+
+    def test_status_reports_the_active_rclone_run_and_latest_statistic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            log = runs / "20260101T010101000000Z-primary.log"
+            log.write_text("Transferred:  1 GiB / 2 GiB, 50%, 10 MiB/s, ETA 1m\n")
+            (runs / "active.json").write_text(
+                json.dumps(
+                    {
+                        "id": "20260101T010101000000Z",
+                        "source": "primary",
+                        "phase": "copy",
+                        "pid": os.getpid(),
+                        "started_at": "2026-01-01T01:01:01+00:00",
+                        "log": str(log),
+                    }
+                )
+            )
+            result = self.run_cli(config, "status")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Active: primary (copy)", result.stdout)
+        self.assertIn("Transferred:  1 GiB / 2 GiB, 50%, 10 MiB/s, ETA 1m", result.stdout)
+
+    def test_status_flags_a_stale_active_run_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            (runs / "active.json").write_text(
+                json.dumps(
+                    {
+                        "id": "20260101T010101000000Z",
+                        "source": "primary",
+                        "phase": "copy",
+                        "pid": 99999999,
+                        "started_at": "2026-01-01T01:01:01+00:00",
+                    }
+                )
+            )
+            result = self.run_cli(config, "status")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Stale active run marker", result.stdout)
+        self.assertNotIn("Active: primary", result.stdout)
+
+    def test_backup_archives_a_stale_active_run_marker_before_starting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            (runs / "active.json").write_text(json.dumps({"id": "crashed-run", "pid": 99999999}))
+            executable = temporary / "rclone"
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            executable.chmod(0o700)
+            environment = os.environ | {"PYTHONPATH": str(ROOT / "src"), "PATH": f"{temporary}:{os.environ['PATH']}"}
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "backup", "primary", "--dry-run"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            archived = runs / "crashed-run.stale"
+            self.assertTrue(archived.is_file())
+            self.assertFalse((runs / "active.json").exists())
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_install_prints_the_user_timer_setup_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            result = self.run_cli(config, "install", "--print-command")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan["service"], str(ROOT / "systemd" / "obu-backup.service.in"))
+        self.assertEqual(plan["timer"], str(ROOT / "systemd" / "obu-backup.timer"))
+        self.assertEqual(
+            plan["commands"],
+            [
+                ["systemctl", "--user", "daemon-reload"],
+                ["systemctl", "--user", "enable", "--now", "obu-backup.timer"],
+            ],
+        )

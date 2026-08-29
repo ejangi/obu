@@ -17,6 +17,7 @@ class Source:
     name: str
     path: Path
     filter_rules: tuple[str, ...]
+    relative_path: Path = Path(".")
 
 
 @dataclass(frozen=True)
