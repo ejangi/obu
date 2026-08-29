@@ -1,4 +1,4 @@
-# OBU backup
+# Orchestrated Back Up
 
 OBU runs conservative, encrypted backups of your computer's drives. It uses an S3-compatible bucket only through an rclone **crypt** remote; rclone keeps all cloud credentials and encryption secrets.
 
