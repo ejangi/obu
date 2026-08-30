@@ -27,7 +27,28 @@ filters = ["common", "primary"]
 rules = ["- **/.cache/**", "- **/*.tmp"]
 
 [filters.primary]
-rules = ["- /Downloads/rebuildable/**"]
+rules = [
+    "- /Downloads/rebuildable/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
+    "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
+    "- **/.config/Element/Cache/**",
+    "- **/.config/Element/GPUCache/**",
+    "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
+    "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
+    "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
+    "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
+    "- **/.config/t3code/**/Cache/**",
+    "- **/.config/t3code/**/Code Cache/**",
+    "- **/.config/t3code/**/GPUCache/**",
+    "- **/.config/t3code/**/DawnGraphiteCache/**",
+    "- **/.config/t3code/**/DawnWebGPUCache/**",
+    "- **/.config/t3code/**/DIPS-wal",
+    "- **/.local/share/gvfs-metadata/**",
+]
 """.format(state=tmp_path / "state")
     )
     return config
@@ -109,7 +130,30 @@ class BackupCliTests(unittest.TestCase):
         self.assertNotIn("--filter-from", command)
         self.assertEqual(
             [command[index + 1] for index, item in enumerate(command) if item == "--filter"],
-            ["- **/.cache/**", "- **/*.tmp", "- /Downloads/rebuildable/**"],
+            [
+                "- **/.cache/**",
+                "- **/*.tmp",
+                "- /Downloads/rebuildable/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
+                "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
+                "- **/.config/Element/Cache/**",
+                "- **/.config/Element/GPUCache/**",
+                "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
+                "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
+                "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
+                "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
+                "- **/.config/t3code/**/Cache/**",
+                "- **/.config/t3code/**/Code Cache/**",
+                "- **/.config/t3code/**/GPUCache/**",
+                "- **/.config/t3code/**/DawnGraphiteCache/**",
+                "- **/.config/t3code/**/DawnWebGPUCache/**",
+                "- **/.config/t3code/**/DIPS-wal",
+                "- **/.local/share/gvfs-metadata/**",
+            ],
         )
 
     def test_scoped_backup_preserves_the_path_below_the_drive_root(self) -> None:
