@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import signal
 from shutil import get_terminal_size
 import struct
 import subprocess
@@ -33,8 +34,16 @@ class AlreadyRunning(BackupError):
     pass
 
 
+class RunCancelled(BackupError):
+    def __init__(self, result: subprocess.CompletedProcess[str]) -> None:
+        super().__init__("backup cancelled by user")
+        self.result = result
+
+
 MAX_RECORDED_OUTPUT_BYTES = 16 * 1024
 LIVE_STATS_FLAGS = ["--stats", "30s", "--stats-one-line", "--stats-log-level", "ERROR"]
+CANCELLED_RETURN_CODE = 130
+CANCELLED_SIGNAL = "SIGINT"
 
 
 def run_id() -> str:
@@ -153,9 +162,13 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                         log_path=copy_log,
                         on_started=lambda pid: record_active_run(settings.state_dir, identifier, source, "copy", pid, copy_log),
                     )
+                except RunCancelled as cancellation:
+                    persist_run(settings.state_dir, identifier, source, command, cancellation.result, phase="copy", cancelled=True)
+                    print("Backup cancelled by user.", file=sys.stderr)
+                    return CANCELLED_RETURN_CODE
                 finally:
                     clear_active_run(settings.state_dir)
-                persist_run(settings.state_dir, identifier, source, command, result)
+                persist_run(settings.state_dir, identifier, source, command, result, phase="copy")
                 if result.returncode:
                     send("Backup failed", f"{source.name}: {result.stderr[-500:]}", urgent=True)
                     return result.returncode
@@ -171,9 +184,21 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                                 settings.state_dir, verification_id, source, "cryptcheck", pid, verification_log
                             ),
                         )
+                    except RunCancelled as cancellation:
+                        persist_run(
+                            settings.state_dir,
+                            verification_id,
+                            source,
+                            verification_command,
+                            cancellation.result,
+                            phase="cryptcheck",
+                            cancelled=True,
+                        )
+                        print("Backup cancelled by user.", file=sys.stderr)
+                        return CANCELLED_RETURN_CODE
                     finally:
                         clear_active_run(settings.state_dir)
-                    persist_run(settings.state_dir, verification_id, source, verification_command, verification)
+                    persist_run(settings.state_dir, verification_id, source, verification_command, verification, phase="cryptcheck")
                     if verification.returncode:
                         send("Backup verification failed", f"{source.name}: {verification.stderr[-500:]}", urgent=True)
                         return verification.returncode
@@ -189,18 +214,30 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
     return 0
 
 
-def persist_run(state_dir: Path, identifier: str, source: Source, command: list[str], result: subprocess.CompletedProcess[str]) -> Path:
+def persist_run(
+    state_dir: Path,
+    identifier: str,
+    source: Source,
+    command: list[str],
+    result: subprocess.CompletedProcess[str],
+    *,
+    phase: str,
+    cancelled: bool = False,
+) -> Path:
     runs = state_dir / "runs"
     ensure_private_directory(runs)
     record = {
         "id": identifier,
         "source": source.name,
+        "phase": phase,
         "finished_at": datetime.now(UTC).isoformat(),
         "returncode": result.returncode,
         "command": command,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+    if cancelled:
+        record.update({"cancelled": True, "signal": CANCELLED_SIGNAL})
     filename = runs / f"{identifier}-{source.name}.json"
     filename.write_text(json.dumps(record, indent=2) + "\n")
     filename.chmod(0o600)
@@ -249,26 +286,31 @@ def execute(
             if log_path:
                 with log_path.open("ab") as live_log:
                     return execute_with_log(command, error_output, live_log, on_started)
-            result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=error_output, check=False)
-            return subprocess.CompletedProcess(command, result.returncode, stdout="", stderr=recorded_output(error_output))
+            return execute_with_log(command, error_output, None, on_started)
     except FileNotFoundError as error:
         raise BackupError("rclone is not installed or is not available on PATH") from error
 
 
 def execute_with_log(
-    command: list[str], error_output: BinaryIO, live_log: BinaryIO, on_started: Callable[[int], None] | None
+    command: list[str], error_output: BinaryIO, live_log: BinaryIO | None, on_started: Callable[[int], None] | None
 ) -> subprocess.CompletedProcess[str]:
     """Capture rclone output while appending it to a live private log."""
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    if on_started:
-        on_started(process.pid)
-    assert process.stderr is not None
-    while chunk := os.read(process.stderr.fileno(), 8192):
-        error_output.write(chunk)
-        live_log.write(chunk)
-        live_log.flush()
-    returncode = process.wait()
-    return subprocess.CompletedProcess(command, returncode, stdout="", stderr=recorded_output(error_output))
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, start_new_session=True)
+    try:
+        if on_started:
+            on_started(process.pid)
+        assert process.stderr is not None
+        while chunk := os.read(process.stderr.fileno(), 8192):
+            record_chunk(error_output, live_log, chunk)
+        returncode = process.wait()
+        return subprocess.CompletedProcess(command, returncode, stdout="", stderr=recorded_output(error_output))
+    except KeyboardInterrupt:
+        stop_process(process, signal.SIGINT)
+        drain_pipe(process.stderr, error_output, live_log)
+        raise RunCancelled(cancelled_result(command, error_output, live_log))
+    except BaseException:
+        stop_process(process, signal.SIGTERM)
+        raise
 
 
 def execute_with_progress(
@@ -282,7 +324,7 @@ def execute_with_progress(
     size = get_terminal_size(fallback=(80, 24))
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", size.lines, size.columns, 0, 0))
     try:
-        process = subprocess.Popen(command, stdout=slave_fd, stderr=slave_fd)
+        process = subprocess.Popen(command, stdout=slave_fd, stderr=slave_fd, start_new_session=True)
         if on_started:
             on_started(process.pid)
     except Exception:
@@ -300,13 +342,17 @@ def execute_with_progress(
                 raise
             if not chunk:
                 break
-            error_output.write(chunk)
-            if live_log is not None:
-                live_log.write(chunk)
-                live_log.flush()
+            record_chunk(error_output, live_log, chunk)
             sys.stderr.buffer.write(chunk)
             sys.stderr.buffer.flush()
         returncode = process.wait()
+    except KeyboardInterrupt:
+        stop_process(process, signal.SIGINT)
+        drain_pty(master_fd, error_output, live_log)
+        raise RunCancelled(cancelled_result(command, error_output, live_log))
+    except BaseException:
+        stop_process(process, signal.SIGTERM)
+        raise
     finally:
         os.close(master_fd)
     return subprocess.CompletedProcess(command, returncode, stdout="", stderr=recorded_output(error_output))
@@ -315,3 +361,55 @@ def execute_with_progress(
 @contextmanager
 def null_binary_output() -> Iterator[None]:
     yield None
+
+
+def record_chunk(error_output: BinaryIO, live_log: BinaryIO | None, chunk: bytes) -> None:
+    error_output.write(chunk)
+    if live_log is not None:
+        live_log.write(chunk)
+        live_log.flush()
+
+
+def stop_process(process: subprocess.Popen[bytes], signum: signal.Signals) -> None:
+    """Signal rclone and any descendants, then reap the child process."""
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def drain_pipe(error_pipe: BinaryIO | None, error_output: BinaryIO, live_log: BinaryIO | None) -> None:
+    if error_pipe is None:
+        return
+    while chunk := os.read(error_pipe.fileno(), 8192):
+        record_chunk(error_output, live_log, chunk)
+
+
+def drain_pty(master_fd: int, error_output: BinaryIO, live_log: BinaryIO | None) -> None:
+    while True:
+        try:
+            chunk = os.read(master_fd, 8192)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                return
+            raise
+        if not chunk:
+            return
+        record_chunk(error_output, live_log, chunk)
+
+
+def cancelled_result(
+    command: list[str], error_output: BinaryIO, live_log: BinaryIO | None
+) -> subprocess.CompletedProcess[str]:
+    record_chunk(error_output, live_log, b"OBU: cancelled by user (SIGINT); rclone child process exited.\n")
+    return subprocess.CompletedProcess(command, CANCELLED_RETURN_CODE, stdout="", stderr=recorded_output(error_output))

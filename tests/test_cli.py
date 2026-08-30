@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -377,6 +379,73 @@ class BackupCliTests(unittest.TestCase):
             self.assertFalse((runs / "active.json").exists())
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_ctrl_c_records_a_cancelled_run_and_reaps_rclone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            started = temporary / "rclone-started"
+            cancelled = temporary / "rclone-cancelled"
+            child_pid = temporary / "rclone-pid"
+            executable = temporary / "rclone"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "echo $$ > \"$OBU_TEST_CHILD_PID\"\n"
+                "trap 'touch \"$OBU_TEST_CANCELLED\"; exit 130' INT TERM\n"
+                "touch \"$OBU_TEST_STARTED\"\n"
+                "while :; do :; done\n"
+            )
+            executable.chmod(0o700)
+            environment = os.environ | {
+                "PYTHONPATH": str(ROOT / "src"),
+                "PATH": f"{temporary}:{os.environ['PATH']}",
+                "OBU_TEST_STARTED": str(started),
+                "OBU_TEST_CANCELLED": str(cancelled),
+                "OBU_TEST_CHILD_PID": str(child_pid),
+            }
+            process = subprocess.Popen(
+                [sys.executable, "-m", "obu", "--config", str(config), "backup", "primary", "--progress"],
+                cwd=ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not started.exists() and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(started.exists(), "fake rclone did not start")
+
+                process.send_signal(signal.SIGINT)
+                _, stderr = process.communicate(timeout=10)
+
+                self.assertEqual(process.returncode, 130, stderr)
+                self.assertIn("cancelled by user", stderr)
+                self.assertTrue(cancelled.exists(), "rclone did not receive a termination signal")
+                self.assertFalse((temporary / "state" / "runs" / "active.json").exists())
+                records = list((temporary / "state" / "runs").glob("*-primary.json"))
+                self.assertEqual(len(records), 1)
+                record = json.loads(records[0].read_text())
+                self.assertEqual(record["returncode"], 130)
+                self.assertTrue(record["cancelled"])
+                self.assertEqual(record["signal"], "SIGINT")
+                self.assertEqual(record["phase"], "copy")
+                self.assertIn("cancelled by user", record["stderr"])
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(int(child_pid.read_text()), 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                if child_pid.exists():
+                    try:
+                        os.kill(int(child_pid.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_install_prints_the_user_timer_setup_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
