@@ -170,7 +170,7 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                     clear_active_run(settings.state_dir)
                 persist_run(settings.state_dir, identifier, source, command, result, phase="copy")
                 if result.returncode:
-                    send("Backup failed", f"{source.name}: {result.stderr[-500:]}", urgent=True)
+                    send("Backup completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
                     return result.returncode
                 if settings.verify and not dry_run:
                     verification_id = identifier + "-check"
@@ -200,7 +200,7 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                         clear_active_run(settings.state_dir)
                     persist_run(settings.state_dir, verification_id, source, verification_command, verification, phase="cryptcheck")
                     if verification.returncode:
-                        send("Backup verification failed", f"{source.name}: {verification.stderr[-500:]}", urgent=True)
+                        send("Backup completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
                         return verification.returncode
     except AlreadyRunning as error:
         send("Backup skipped", str(error))

@@ -158,6 +158,11 @@ class BackupCliTests(unittest.TestCase):
             ],
         )
 
+    def test_example_config_excludes_obu_live_state(self) -> None:
+        example = (ROOT / "config.example.toml").read_text()
+
+        self.assertIn('"- **/.local/state/obu/**"', example)
+
     def test_scoped_backup_preserves_the_path_below_the_drive_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = write_config(Path(directory))
@@ -379,6 +384,110 @@ class BackupCliTests(unittest.TestCase):
             self.assertFalse((runs / "active.json").exists())
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_failed_backup_notification_is_concise_and_keeps_details_in_the_run_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            notification = temporary / "notification"
+            rclone = temporary / "rclone"
+            rclone.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' 'rclone: opaque, unpleasant transfer error details' >&2\n"
+                "exit 7\n"
+            )
+            rclone.chmod(0o700)
+            notify_send = temporary / "notify-send"
+            notify_send.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$OBU_TEST_NOTIFICATION\"\n")
+            notify_send.chmod(0o700)
+            environment = os.environ | {
+                "PYTHONPATH": str(ROOT / "src"),
+                "PATH": f"{temporary}:{os.environ['PATH']}",
+                "OBU_TEST_NOTIFICATION": str(notification),
+            }
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "backup", "primary"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            records = list((temporary / "state" / "runs").glob("*-primary.json"))
+            self.assertEqual(len(records), 1)
+            record = json.loads(records[0].read_text())
+            notification_text = notification.read_text()
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(
+            notification_text.splitlines(),
+            [
+                "--app-name",
+                "OBU Backup",
+                "--urgency",
+                "critical",
+                "Backup completed with errors",
+                "primary: See obu logs for details.",
+            ],
+        )
+        self.assertIn("opaque, unpleasant transfer error details", record["stderr"])
+
+    def test_failed_verification_notification_is_concise_and_keeps_details_in_the_run_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            notification = temporary / "notification"
+            rclone = temporary / "rclone"
+            rclone.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = cryptcheck ]; then\n"
+                "  printf '%s\\n' 'rclone: opaque, unpleasant verification error details' >&2\n"
+                "  exit 8\n"
+                "fi\n"
+            )
+            rclone.chmod(0o700)
+            notify_send = temporary / "notify-send"
+            notify_send.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$OBU_TEST_NOTIFICATION\"\n")
+            notify_send.chmod(0o700)
+            environment = os.environ | {
+                "PYTHONPATH": str(ROOT / "src"),
+                "PATH": f"{temporary}:{os.environ['PATH']}",
+                "OBU_TEST_NOTIFICATION": str(notification),
+            }
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "backup", "primary"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            records = list((temporary / "state" / "runs").glob("*-check-primary.json"))
+            self.assertEqual(len(records), 1)
+            record = json.loads(records[0].read_text())
+            notification_text = notification.read_text()
+
+        self.assertEqual(result.returncode, 8)
+        self.assertEqual(
+            notification_text.splitlines(),
+            [
+                "--app-name",
+                "OBU Backup",
+                "--urgency",
+                "critical",
+                "Backup completed with errors",
+                "primary: See obu logs for details.",
+            ],
+        )
+        self.assertIn("opaque, unpleasant verification error details", record["stderr"])
 
     def test_ctrl_c_records_a_cancelled_run_and_reaps_rclone(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

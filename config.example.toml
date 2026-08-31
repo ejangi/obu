@@ -28,6 +28,8 @@ rules = [
   "- **/__pycache__/**",
   "- **/*.pyc",
   "- **/*.tmp",
+  # OBU writes active-run logs here while a backup is in progress.
+  "- **/.local/state/obu/**",
   "- **/*~",
 ]
 
