@@ -354,6 +354,32 @@ class BackupCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Stale active run marker", result.stdout)
+
+    def test_status_treats_a_zombie_rclone_as_a_stale_active_run(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            child_pid = os.fork()
+            if child_pid == 0:
+                os._exit(0)
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    state = Path(f"/proc/{child_pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+                    if state == "Z":
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("test child did not become a zombie")
+                (runs / "active.json").write_text(json.dumps({"id": "crashed-run", "pid": child_pid}))
+                result = self.run_cli(config, "status")
+            finally:
+                os.waitpid(child_pid, 0)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Stale active run marker", result.stdout)
         self.assertNotIn("Active: primary", result.stdout)
 
     def test_backup_archives_a_stale_active_run_marker_before_starting(self) -> None:
@@ -553,6 +579,49 @@ class BackupCliTests(unittest.TestCase):
                 if child_pid.exists():
                     try:
                         os.kill(int(child_pid.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_progress_finishes_when_rclone_exits_but_a_descendant_keeps_the_pty_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            rclone_pid = temporary / "rclone-pid"
+            executable = temporary / "rclone"
+            executable.write_text(
+                "#!/bin/sh\n"
+                "echo $$ > \"$OBU_TEST_RCLONE_PID\"\n"
+                "sleep 30 &\n"
+                "exit 0\n"
+            )
+            executable.chmod(0o700)
+            environment = os.environ | {
+                "PYTHONPATH": str(ROOT / "src"),
+                "PATH": f"{temporary}:{os.environ['PATH']}",
+                "OBU_TEST_RCLONE_PID": str(rclone_pid),
+            }
+            process = subprocess.Popen(
+                [sys.executable, "-m", "obu", "--config", str(config), "backup", "primary", "--progress"],
+                cwd=ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                _, stderr = process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertTrue(rclone_pid.exists(), "fake rclone did not start")
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
+                if rclone_pid.exists():
+                    try:
+                        os.killpg(int(rclone_pid.read_text()), signal.SIGKILL)
                     except ProcessLookupError:
                         pass
 

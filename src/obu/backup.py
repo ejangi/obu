@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import select
 import signal
 from shutil import get_terminal_size
 import struct
@@ -44,6 +45,7 @@ MAX_RECORDED_OUTPUT_BYTES = 16 * 1024
 LIVE_STATS_FLAGS = ["--stats", "30s", "--stats-one-line", "--stats-log-level", "ERROR"]
 CANCELLED_RETURN_CODE = 130
 CANCELLED_SIGNAL = "SIGINT"
+PTY_POLL_SECONDS = 0.25
 
 
 def run_id() -> str:
@@ -333,19 +335,18 @@ def execute_with_progress(
     finally:
         os.close(slave_fd)
     try:
-        while True:
-            try:
-                chunk = os.read(master_fd, 8192)
-            except OSError as error:
-                if error.errno == errno.EIO:
-                    break
-                raise
-            if not chunk:
+        while process.poll() is None:
+            readable, _, _ = select.select([master_fd], [], [], PTY_POLL_SECONDS)
+            if not readable:
+                continue
+            chunk = read_pty(master_fd)
+            if chunk is None:
                 break
             record_chunk(error_output, live_log, chunk)
             sys.stderr.buffer.write(chunk)
             sys.stderr.buffer.flush()
         returncode = process.wait()
+        drain_available_pty(master_fd, error_output, live_log)
     except KeyboardInterrupt:
         stop_process(process, signal.SIGINT)
         drain_pty(master_fd, error_output, live_log)
@@ -397,15 +398,30 @@ def drain_pipe(error_pipe: BinaryIO | None, error_output: BinaryIO, live_log: Bi
 
 def drain_pty(master_fd: int, error_output: BinaryIO, live_log: BinaryIO | None) -> None:
     while True:
-        try:
-            chunk = os.read(master_fd, 8192)
-        except OSError as error:
-            if error.errno == errno.EIO:
-                return
-            raise
-        if not chunk:
+        chunk = read_pty(master_fd)
+        if chunk is None:
             return
         record_chunk(error_output, live_log, chunk)
+
+
+def drain_available_pty(master_fd: int, error_output: BinaryIO, live_log: BinaryIO | None) -> None:
+    """Record buffered PTY output without waiting for lingering descendants."""
+    while select.select([master_fd], [], [], 0)[0]:
+        chunk = read_pty(master_fd)
+        if chunk is None:
+            return
+        record_chunk(error_output, live_log, chunk)
+
+
+def read_pty(master_fd: int) -> bytes | None:
+    """Read one PTY chunk, treating its Linux hangup signal as end of output."""
+    try:
+        chunk = os.read(master_fd, 8192)
+    except OSError as error:
+        if error.errno == errno.EIO:
+            return None
+        raise
+    return chunk or None
 
 
 def cancelled_result(

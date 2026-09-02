@@ -72,14 +72,26 @@ def process_is_running(record: dict[str, object]) -> bool:
         return False
     except PermissionError:
         return True
+    if process_state(pid) == "Z":
+        return False
     expected_start = record.get("process_start")
     return not isinstance(expected_start, str) or process_start(pid) == expected_start
 
 
 def process_start(pid: int) -> str | None:
     """Return Linux's process-start tick value, stable across PID reuse."""
+    fields = process_stat_fields(pid)
+    return fields[19] if fields is not None and len(fields) > 19 else None
+
+
+def process_state(pid: int) -> str | None:
+    """Return Linux's single-letter process state, such as ``Z`` for a zombie."""
+    fields = process_stat_fields(pid)
+    return fields[0] if fields else None
+
+
+def process_stat_fields(pid: int) -> list[str] | None:
     try:
-        fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        return fields[19]
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     except (IndexError, OSError):
         return None
