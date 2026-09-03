@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 from . import all as all_command
-from . import backup, install, logs, restore, status
+from . import backup, install, logs, restore, status, sync
 from .config import ConfigError, load_settings
 from .install import InstallError
 
@@ -20,6 +20,7 @@ def parser() -> argparse.ArgumentParser:
     commands = result.add_subparsers(dest="action", required=True)
     add_command(commands, "backup", backup)
     add_command(commands, "all", all_command)
+    add_command(commands, "sync", sync)
     add_command(commands, "restore", restore)
     add_command(commands, "status", status)
     add_command(commands, "logs", logs)

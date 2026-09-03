@@ -30,8 +30,8 @@ OBU runs conservative, encrypted backups of your computer's drives. It uses an S
 
    Always use `obu-crypt:` for backups and restores; using `<provider>:` directly bypasses encryption. This bucket is dedicated to this computer; OBU keeps each drive separately under its encrypted `hosts/<host>/<drive>/` layout.
 
-4. Copy `config.example.toml` to `config.toml`, replace both mounted-drive paths, and optionally set a stable hostname.
-5. Review the `[filters.common]`, `[filters.primary]`, and `[filters.secondary]` sections in `config.toml`. They are the persistent blacklist and use native rclone filter syntax. Keep only files that can be safely recreated; a leading `-` excludes a pattern. Each drive selects its ordered groups with `filters = ["common", "primary"]` (or `secondary`).
+4. Copy `config.example.toml` to `config.toml`, replace the configured source paths, and optionally set a stable hostname.
+5. Review the `[filters.*]` sections in `config.toml`. They are the persistent blacklist and use native rclone filter syntax. Keep only files that can be safely recreated; a leading `-` excludes a pattern. Each source selects its ordered groups with `filters = ["common", "primary"]`.
 6. Review the planned commands, then simulate the transfer:
 
    ```bash
@@ -39,17 +39,17 @@ OBU runs conservative, encrypted backups of your computer's drives. It uses an S
    ./obu all --dry-run
    ```
 
-7. Enable the nightly systemd user timer:
+7. Set `schedule` in `config.toml` if the default 02:30 daily run does not suit, then enable the systemd user timer:
 
    ```bash
    ./obu install
    ```
 
-The timer runs at 02:30 with a randomized delay of up to 30 minutes and catches up after downtime. Change `systemd/obu-backup.timer` and rerun `./obu install` to alter that schedule. Inspect the setup without changing user units with `./obu install --print-command`.
+The timer uses the `schedule` systemd `OnCalendar` expression from `config.toml`, adds a randomized delay of up to 30 minutes, and catches up after downtime. After changing `schedule`, rerun `./obu install` to regenerate and reload the timer. Inspect the setup without changing user units with `./obu install --print-command`.
 
 ## Operations
 
-Run one drive with `./obu backup primary`; use `secondary` for the 2 TB drive. Run `./obu status` to read the last recorded runs in `~/.local/state/obu/runs/`.
+Run one configured source with `./obu backup primary`; this checkout also uses `secondary` for `/mnt/storage` and `tertiary` for the unlocked `/mnt/Photos` filesystem. `secondary` explicitly excludes `/Photos/photo-library.luks`, so the live encrypted container is not copied while Immich uses it. Run `./obu status` to read the last recorded runs in `~/.local/state/obu/runs/`.
 
 While OBU has started rclone itself, `status` also reports the active source, phase (`copy` or `cryptcheck`), PID, start time, and the latest one-line rclone statistic from its private live log. Statistics update every 30 seconds. If a crash leaves an active marker for a dead process, `status` flags it; the next safely locked backup archives that marker as a `.stale` record before starting.
 
@@ -74,7 +74,7 @@ Each completed copy or verification run has a private JSON record there. Rclone 
 
 `logs` reads a completed record by default. Add `--watch` to follow the newest matching private run log, like `tail -F`; it switches to a newer run when one starts. Press Ctrl-C to stop watching without interrupting the backup. Foreground runs started with `--progress` provide live transfer statistics; quiet scheduled runs append rclone output and errors.
 
-To back up one file or directory before running a full drive backup, pass it as the optional second positional argument. The first argument is the configured source name (`primary` or `secondary`). OBU preserves the path below that drive's encrypted backup root:
+To back up one file or directory before running a full drive backup, pass it as the optional second positional argument. The first argument is a configured source name. OBU preserves the path below that source's encrypted backup root:
 
 ```bash
 ./obu backup secondary /mnt/storage/Wallpapers --dry-run
@@ -91,7 +91,17 @@ make integration-wallpapers
 
 It restores only that encrypted subtree to a newly-created `/tmp/obu-restore-*` directory, runs `rclone check --one-way --links` against `/mnt/storage/Wallpapers`, and removes the temporary directory afterwards. Run `python3 tests/integration_restore_check.py --keep-temp` when inspection is needed.
 
-Backups use `rclone copy`, never automatic remote deletion. If an existing remote object is replaced, its earlier version moves to `hosts/<host>/<drive>/history/<timestamp>` in the crypt remote. This protects against conflicts and makes manual recovery possible. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
+Backups use `rclone copy`, never automatic remote deletion. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
+
+To make a remote current tree match a source and remove paths now excluded by its filters, use the explicit `sync` command. It uses `rclone sync --delete-excluded`, so always review the plan and dry run before performing it:
+
+```bash
+./obu sync secondary --print-command
+./obu sync secondary --dry-run
+./obu sync secondary --progress
+```
+
+`sync` also runs `cryptcheck` after a successful transfer.
 
 Restore a full current drive backup into an existing empty destination with:
 
@@ -113,8 +123,6 @@ mkdir /tmp/obu-file-restore
 
 The target must exist and be empty, protecting it from accidental overwrite. A scoped restore reads only the matching encrypted backup subtree; it does not require a whole-drive restore.
 
-For an older version, list and copy the encrypted `history/` path with rclone after first using `rclone lsd obu-crypt:hosts/<host>/primary/history`.
-
 ## Development
 
-Run `make check`. The standard-library test suite covers the public CLI plan: encryption guardrails, safe copy semantics, history, and filters. No test or script reads rclone configuration or credentials.
+Run `make check`. The standard-library test suite covers the public CLI plan: encryption guardrails, copy and sync semantics, and filters. No test or script reads rclone configuration or credentials.

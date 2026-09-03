@@ -9,6 +9,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from obu.config import load_settings
+from obu.install import install_timer
 
 
 ROOT = Path(__file__).parents[1]
@@ -86,7 +90,7 @@ class BackupCliTests(unittest.TestCase):
                 logs_help = self.run_root_cli("logs", help_option)
 
                 self.assertEqual(root_help.returncode, 0, root_help.stderr)
-                self.assertIn("{backup,all,restore,status,logs,install}", root_help.stdout)
+                self.assertIn("{backup,all,sync,restore,status,logs,install}", root_help.stdout)
                 self.assertEqual(logs_help.returncode, 0, logs_help.stderr)
                 self.assertIn("Show completed rclone output or follow a live run log.", logs_help.stdout)
                 self.assertIn("--source", logs_help.stdout)
@@ -98,8 +102,7 @@ class BackupCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SOURCE [PATH]", result.stdout)
-        self.assertIn("primary", result.stdout)
-        self.assertIn("secondary", result.stdout)
+        self.assertIn("configured source name", result.stdout)
 
     def test_restore_help_describes_its_uppercase_positional_arguments(self) -> None:
         result = self.run_root_cli("restore", "--help")
@@ -109,7 +112,7 @@ class BackupCliTests(unittest.TestCase):
         self.assertIn("configured source name", result.stdout)
         self.assertIn("existing empty directory", result.stdout)
 
-    def test_backup_prints_a_copy_plan_with_version_history(self) -> None:
+    def test_backup_prints_a_copy_plan_without_obu_managed_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = write_config(Path(directory))
             result = self.run_cli(config)
@@ -119,8 +122,7 @@ class BackupCliTests(unittest.TestCase):
         command = plan["command"]
         self.assertEqual(command[:3], ["rclone", "copy", "/data/primary"])
         self.assertEqual(command[3], "obu-crypt:hosts/test-host/primary/current")
-        self.assertIn("--backup-dir", command)
-        self.assertIn("obu-crypt:hosts/test-host/primary/history/", command[command.index("--backup-dir") + 1])
+        self.assertNotIn("--backup-dir", command)
         self.assertIn("--links", command)
         self.assertEqual(command[command.index("--log-level") + 1], "ERROR")
         self.assertEqual(command[command.index("--stats") + 1], "30s")
@@ -158,6 +160,95 @@ class BackupCliTests(unittest.TestCase):
             ],
         )
 
+    def test_sync_plan_deletes_currently_excluded_destination_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            result = self.run_cli(config, "sync", "primary", "--print-command")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        command = plan["command"]
+        self.assertEqual(command[:4], ["rclone", "sync", "/data/primary", "obu-crypt:hosts/test-host/primary/current"])
+        self.assertIn("--delete-excluded", command)
+        self.assertNotIn("--backup-dir", command)
+        self.assertIn("- /Downloads/rebuildable/**", command)
+        self.assertEqual(plan["verification_command"][:2], ["rclone", "cryptcheck"])
+        self.assertIn("--one-way", plan["verification_command"])
+
+    def test_sync_runs_with_a_standard_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            source = temporary / "source"
+            source.mkdir()
+            config = write_config(temporary)
+            config.write_text(config.read_text().replace('path = "/data/primary"', f'path = "{source}"'))
+            executable = temporary / "rclone"
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            executable.chmod(0o700)
+            environment = os.environ | {"PYTHONPATH": str(ROOT / "src"), "PATH": f"{temporary}:{os.environ['PATH']}"}
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "sync", "primary"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tertiary_photo_library_source_excludes_its_live_container_from_secondary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            config.write_text(
+                config.read_text().replace(
+                    "[filters.primary]",
+                    """[sources.secondary]
+path = "/mnt/storage"
+filters = ["common", "secondary"]
+
+[sources.tertiary]
+path = "/mnt/Photos"
+filters = ["common", "tertiary"]
+
+[filters.primary]""",
+                )
+                + """
+
+[filters.secondary]
+rules = ["- /Photos/photo-library.luks"]
+
+[filters.tertiary]
+rules = [
+    "- /lost+found/**",
+    "- /immich/model-cache/**",
+    "- /immich/postgres/**",
+]
+"""
+            )
+            secondary = self.run_cli(config, "backup", "secondary", "--print-command")
+            tertiary = self.run_cli(config, "backup", "tertiary", "--print-command")
+
+        self.assertEqual(secondary.returncode, 0, secondary.stderr)
+        secondary_plan = json.loads(secondary.stdout)
+        self.assertEqual(secondary_plan["command"][2:4], ["/mnt/storage", "obu-crypt:hosts/test-host/secondary/current"])
+        self.assertIn("- /Photos/photo-library.luks", secondary_plan["command"])
+        self.assertIn("- /Photos/photo-library.luks", secondary_plan["verification_command"])
+
+        self.assertEqual(tertiary.returncode, 0, tertiary.stderr)
+        tertiary_plan = json.loads(tertiary.stdout)
+        self.assertEqual(tertiary_plan["command"][2:4], ["/mnt/Photos", "obu-crypt:hosts/test-host/tertiary/current"])
+        self.assertNotIn("- /Photos/photo-library.luks", tertiary_plan["command"])
+        self.assertEqual(
+            [tertiary_plan["command"][index + 1] for index, item in enumerate(tertiary_plan["command"]) if item == "--filter"][-3:],
+            [
+                "- /lost+found/**",
+                "- /immich/model-cache/**",
+                "- /immich/postgres/**",
+            ],
+        )
+
     def test_example_config_excludes_obu_live_state(self) -> None:
         example = (ROOT / "config.example.toml").read_text()
 
@@ -177,8 +268,7 @@ class BackupCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         plan = json.loads(result.stdout)
         self.assertEqual(plan["command"][2:4], ["/data/primary/Wallpapers", "obu-crypt:hosts/test-host/primary/current/Wallpapers"])
-        self.assertIn("obu-crypt:hosts/test-host/primary/history/", plan["command"][plan["command"].index("--backup-dir") + 1])
-        self.assertTrue(plan["command"][plan["command"].index("--backup-dir") + 1].endswith("/Wallpapers"))
+        self.assertNotIn("--backup-dir", plan["command"])
 
     def test_progress_requests_rclone_live_progress_for_copy_and_check(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -634,6 +724,7 @@ class BackupCliTests(unittest.TestCase):
         plan = json.loads(result.stdout)
         self.assertEqual(plan["service"], str(ROOT / "systemd" / "obu-backup.service.in"))
         self.assertEqual(plan["timer"], str(ROOT / "systemd" / "obu-backup.timer"))
+        self.assertEqual(plan["schedule"], "*-*-* 02:30:00")
         self.assertEqual(
             plan["commands"],
             [
@@ -641,3 +732,25 @@ class BackupCliTests(unittest.TestCase):
                 ["systemctl", "--user", "enable", "--now", "obu-backup.timer"],
             ],
         )
+
+    def test_install_writes_the_schedule_from_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            state_line = f'state_dir = "{temporary / "state"}"'
+            config.write_text(
+                config.read_text().replace(
+                    state_line,
+                    f'{state_line}\nschedule = "Mon..Fri *-*-* 01:15:00"',
+                )
+            )
+            user_units = temporary / "user-units"
+
+            with patch("obu.install.subprocess.run") as systemctl:
+                install_timer(ROOT, load_settings(config).schedule, user_units=user_units)
+
+            timer = (user_units / "obu-backup.timer").read_text()
+
+        self.assertIn("OnCalendar=Mon..Fri *-*-* 01:15:00", timer)
+        self.assertNotIn("@@SCHEDULE@@", timer)
+        self.assertEqual(systemctl.call_count, 2)

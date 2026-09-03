@@ -56,10 +56,6 @@ def destination(settings: Settings, source: Source) -> str:
     return destination_root(settings, source) + remote_suffix(source.relative_path)
 
 
-def history_destination(settings: Settings, source: Source, identifier: str) -> str:
-    return f"{settings.remote}hosts/{settings.host}/{source.name}/history/{identifier}" + remote_suffix(source.relative_path)
-
-
 def destination_root(settings: Settings, source: Source) -> str:
     return f"{settings.remote}hosts/{settings.host}/{source.name}/current"
 
@@ -68,10 +64,9 @@ def remote_suffix(relative_path: Path) -> str:
     return "" if relative_path == Path(".") else f"/{relative_path.as_posix()}"
 
 
-def copy_command(settings: Settings, source: Source, identifier: str, dry_run: bool = False, progress: bool = False) -> list[str]:
+def copy_command(settings: Settings, source: Source, dry_run: bool = False, progress: bool = False) -> list[str]:
     command = [
         "rclone", "copy", str(source.path), destination(settings, source),
-        "--backup-dir", history_destination(settings, source, identifier),
         "--create-empty-src-dirs", "--links", "--log-level", "ERROR", *LIVE_STATS_FLAGS,
     ]
     for rule in source.filter_rules:
@@ -96,7 +91,7 @@ def check_command(settings: Settings, source: Source, progress: bool = False) ->
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("source", metavar="SOURCE", help="configured source name: 'primary' or 'secondary'")
+    parser.add_argument("source", metavar="SOURCE", help="configured source name")
     parser.add_argument("path", type=Path, nargs="?", metavar="PATH", help="optional file or directory inside SOURCE")
     parser.add_argument("--dry-run", action="store_true", help="ask rclone to simulate the copy")
     parser.add_argument("--progress", action="store_true", help="show rclone transfer progress in this terminal")
@@ -143,9 +138,32 @@ def print_plan(command: list[str], verification_command: list[str] | None = None
 
 
 def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, progress: bool, print_command: bool) -> int:
+    return run_transfer(
+        settings,
+        sources,
+        command_builder=copy_command,
+        phase="copy",
+        operation="Backup",
+        dry_run=dry_run,
+        progress=progress,
+        print_command=print_command,
+    )
+
+
+def run_transfer(
+    settings: Settings,
+    sources: list[Source],
+    *,
+    command_builder: Callable[[Settings, Source, bool, bool], list[str]],
+    phase: str,
+    operation: str,
+    dry_run: bool,
+    progress: bool,
+    print_command: bool,
+) -> int:
     identifier = run_id()
     commands = [
-        (source, copy_command(settings, source, identifier, dry_run, progress), check_command(settings, source, progress))
+        (source, command_builder(settings, source, dry_run, progress), check_command(settings, source, progress))
         for source in sources
     ]
     if print_command:
@@ -162,17 +180,17 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                         command,
                         progress=progress,
                         log_path=copy_log,
-                        on_started=lambda pid: record_active_run(settings.state_dir, identifier, source, "copy", pid, copy_log),
+                        on_started=lambda pid: record_active_run(settings.state_dir, identifier, source, phase, pid, copy_log),
                     )
                 except RunCancelled as cancellation:
-                    persist_run(settings.state_dir, identifier, source, command, cancellation.result, phase="copy", cancelled=True)
-                    print("Backup cancelled by user.", file=sys.stderr)
+                    persist_run(settings.state_dir, identifier, source, command, cancellation.result, phase=phase, cancelled=True)
+                    print(f"{operation} cancelled by user.", file=sys.stderr)
                     return CANCELLED_RETURN_CODE
                 finally:
                     clear_active_run(settings.state_dir)
-                persist_run(settings.state_dir, identifier, source, command, result, phase="copy")
+                persist_run(settings.state_dir, identifier, source, command, result, phase=phase)
                 if result.returncode:
-                    send("Backup completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
+                    send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
                     return result.returncode
                 if settings.verify and not dry_run:
                     verification_id = identifier + "-check"
@@ -196,23 +214,23 @@ def run_backup(settings: Settings, sources: list[Source], *, dry_run: bool, prog
                             phase="cryptcheck",
                             cancelled=True,
                         )
-                        print("Backup cancelled by user.", file=sys.stderr)
+                        print(f"{operation} cancelled by user.", file=sys.stderr)
                         return CANCELLED_RETURN_CODE
                     finally:
                         clear_active_run(settings.state_dir)
                     persist_run(settings.state_dir, verification_id, source, verification_command, verification, phase="cryptcheck")
                     if verification.returncode:
-                        send("Backup completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
+                        send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
                         return verification.returncode
     except AlreadyRunning as error:
-        send("Backup skipped", str(error))
+        send(f"{operation} skipped", str(error))
         print(error, file=sys.stderr)
         return 75
     except BackupError as error:
-        send("Backup could not start", str(error), urgent=True)
+        send(f"{operation} could not start", str(error), urgent=True)
         print(error, file=sys.stderr)
         return 2
-    send("Backup complete", ", ".join(source.name for source in sources))
+    send(f"{operation} complete", ", ".join(source.name for source in sources))
     return 0
 
 

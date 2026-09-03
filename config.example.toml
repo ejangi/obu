@@ -1,10 +1,12 @@
-# Copy to config.toml and replace the two paths with the mounted drives.
+# Copy to config.toml and replace the source paths with the mounted drives.
 # Credentials and crypt passwords live only in rclone's configuration.
 remote = "obu-crypt:"
 # Leave host blank to use this computer's hostname; set it to keep names stable.
 host = ""
 state_dir = "~/.local/state/obu"
 verify = true
+# systemd OnCalendar expression; applied when you rerun ./obu install.
+schedule = "*-*-* 02:30:00"
 
 # Primary 1 TB drive.
 [sources.primary]
@@ -15,6 +17,11 @@ filters = ["common", "primary"]
 [sources.secondary]
 path = "/media/REPLACE_ME/secondary"
 filters = ["common", "secondary"]
+
+# Mounted photo library. Its encrypted container is excluded from secondary.
+[sources.tertiary]
+path = "/mnt/Photos"
+filters = ["common", "tertiary"]
 
 # Rules use rclone's filter syntax and run in the listed order. Keep any
 # specific re-inclusions above an exclusion that would otherwise match them.
@@ -40,5 +47,15 @@ rules = [
 
 [filters.secondary]
 rules = [
+  # Back up the unlocked photo filesystem above, never this live LUKS container.
+  "- /Photos/photo-library.luks",
   # "- /Scratch/**",
+]
+
+[filters.tertiary]
+rules = [
+  # Exclude unreadable service/system directories from the mounted photo filesystem.
+  "- /lost+found/**",
+  "- /immich/model-cache/**",
+  "- /immich/postgres/**",
 ]

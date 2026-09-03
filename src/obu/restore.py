@@ -12,7 +12,7 @@ from .sources import scoped, selected
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("source", metavar="SOURCE", help="configured source name: 'primary' or 'secondary'")
+    parser.add_argument("source", metavar="SOURCE", help="configured source name")
     parser.add_argument("target", type=Path, metavar="TARGET", help="existing empty directory that receives restored files")
     parser.add_argument("--path", type=Path, help="optional file or directory inside SOURCE")
     parser.add_argument("--dry-run", action="store_true")

@@ -27,6 +27,7 @@ class Settings:
     state_dir: Path
     sources: dict[str, Source]
     verify: bool
+    schedule: str
 
 
 def load_settings(filename: Path) -> Settings:
@@ -83,10 +84,14 @@ def load_settings(filename: Path) -> Settings:
     verify = raw.get("verify", True)
     if not isinstance(verify, bool):
         raise ConfigError("verify must be true or false")
+    schedule = raw.get("schedule", "*-*-* 02:30:00")
+    if not isinstance(schedule, str) or not schedule.strip() or "\n" in schedule or "\r" in schedule:
+        raise ConfigError("schedule must be a non-empty systemd OnCalendar expression on one line")
     return Settings(
         remote=remote,
         host=host,
         state_dir=Path(state_value).expanduser(),
         sources=sources,
         verify=verify,
+        schedule=schedule.strip(),
     )

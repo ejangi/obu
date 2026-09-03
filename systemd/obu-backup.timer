@@ -2,7 +2,7 @@
 Description=Run OBU encrypted backup each night
 
 [Timer]
-OnCalendar=*-*-* 02:30:00
+OnCalendar=@@SCHEDULE@@
 RandomizedDelaySec=30m
 Persistent=true
 
