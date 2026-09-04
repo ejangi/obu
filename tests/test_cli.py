@@ -54,6 +54,18 @@ rules = [
     "- **/.config/t3code/**/DawnWebGPUCache/**",
     "- **/.config/t3code/**/DIPS-wal",
     "- **/.local/share/gvfs-metadata/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
+    "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
+    "- **/.config/t3code/Cache/**",
+    "- **/.config/t3code/GPUCache/**",
+    "- **/.config/t3code/DawnGraphiteCache/**",
+    "- **/.config/t3code/DawnWebGPUCache/**",
+    "- **/.config/t3code/DIPS-wal",
 ]
 """.format(state=tmp_path / "state")
     )
@@ -157,6 +169,18 @@ class BackupCliTests(unittest.TestCase):
                 "- **/.config/t3code/**/DawnWebGPUCache/**",
                 "- **/.config/t3code/**/DIPS-wal",
                 "- **/.local/share/gvfs-metadata/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
+                "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
+                "- **/.config/t3code/Cache/**",
+                "- **/.config/t3code/GPUCache/**",
+                "- **/.config/t3code/DawnGraphiteCache/**",
+                "- **/.config/t3code/DawnWebGPUCache/**",
+                "- **/.config/t3code/DIPS-wal",
             ],
         )
 
@@ -174,6 +198,36 @@ class BackupCliTests(unittest.TestCase):
         self.assertIn("- /Downloads/rebuildable/**", command)
         self.assertEqual(plan["verification_command"][:2], ["rclone", "cryptcheck"])
         self.assertIn("--one-way", plan["verification_command"])
+
+    def test_runtime_state_exclusions_apply_to_copy_and_cryptcheck(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = write_config(Path(directory))
+            result = self.run_cli(config)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        copy_filters = [plan["command"][index + 1] for index, item in enumerate(plan["command"]) if item == "--filter"]
+        check_filters = [
+            plan["verification_command"][index + 1]
+            for index, item in enumerate(plan["verification_command"])
+            if item == "--filter"
+        ]
+        expected = {
+            "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
+            "- **/.config/t3code/Cache/**",
+            "- **/.config/t3code/GPUCache/**",
+            "- **/.config/t3code/DawnGraphiteCache/**",
+            "- **/.config/t3code/DawnWebGPUCache/**",
+            "- **/.config/t3code/DIPS-wal",
+        }
+        self.assertTrue(expected.issubset(copy_filters))
+        self.assertTrue(expected.issubset(check_filters))
 
     def test_sync_runs_with_a_standard_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

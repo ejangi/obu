@@ -8,25 +8,26 @@ verify = true
 # systemd OnCalendar expression; applied when you rerun ./obu install.
 schedule = "*-*-* 02:30:00"
 
-# Primary 1 TB drive.
+# Primary drive
 [sources.primary]
 path = "/media/REPLACE_ME/primary"
 filters = ["common", "primary"]
 
-# Secondary 2 TB drive.
+# Secondary drive
 [sources.secondary]
 path = "/media/REPLACE_ME/secondary"
 filters = ["common", "secondary"]
 
-# Mounted photo library. Its encrypted container is excluded from secondary.
+# Tertiary drive
 [sources.tertiary]
-path = "/mnt/Photos"
+path = "/media/REPLACE_ME/tertiary"
 filters = ["common", "tertiary"]
 
 # Rules use rclone's filter syntax and run in the listed order. Keep any
 # specific re-inclusions above an exclusion that would otherwise match them.
 [filters.common]
 rules = [
+  "- **/.local/state/obu/**",
   "- .DS_Store",
   "- Thumbs.db",
   "- **/.Trash/**",
@@ -35,27 +36,24 @@ rules = [
   "- **/__pycache__/**",
   "- **/*.pyc",
   "- **/*.tmp",
-  # OBU writes active-run logs here while a backup is in progress.
-  "- **/.local/state/obu/**",
   "- **/*~",
 ]
 
 [filters.primary]
 rules = [
   # "- /Downloads/rebuildable/**",
+  "- /lost+found/**",
 ]
 
 [filters.secondary]
 rules = [
   # Back up the unlocked photo filesystem above, never this live LUKS container.
-  "- /Photos/photo-library.luks",
   # "- /Scratch/**",
+  "- /lost+found/**",
 ]
 
 [filters.tertiary]
 rules = [
   # Exclude unreadable service/system directories from the mounted photo filesystem.
   "- /lost+found/**",
-  "- /immich/model-cache/**",
-  "- /immich/postgres/**",
 ]
