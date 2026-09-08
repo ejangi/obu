@@ -172,56 +172,30 @@ def run_transfer(
         return 0
     try:
         with backup_lock(settings.state_dir):
+            completed: list[str] = []
+            first_error = 0
             for source, command, verification_command in commands:
-                validate_source(source)
-                copy_log = run_log_path(settings.state_dir, identifier, source)
-                try:
-                    result = execute(
-                        command,
-                        progress=progress,
-                        log_path=copy_log,
-                        on_started=lambda pid: record_active_run(settings.state_dir, identifier, source, phase, pid, copy_log),
-                    )
-                except RunCancelled as cancellation:
-                    persist_run(settings.state_dir, identifier, source, command, cancellation.result, phase=phase, cancelled=True)
-                    print(f"{operation} cancelled by user.", file=sys.stderr)
+                returncode = transfer_source(
+                    settings,
+                    identifier,
+                    source,
+                    command,
+                    verification_command,
+                    phase=phase,
+                    operation=operation,
+                    dry_run=dry_run,
+                    progress=progress,
+                )
+                if returncode == CANCELLED_RETURN_CODE:
                     return CANCELLED_RETURN_CODE
-                finally:
-                    clear_active_run(settings.state_dir)
-                persist_run(settings.state_dir, identifier, source, command, result, phase=phase)
-                if result.returncode:
-                    send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
-                    return result.returncode
-                if settings.verify and not dry_run:
-                    verification_id = identifier + "-check"
-                    verification_log = run_log_path(settings.state_dir, verification_id, source)
-                    try:
-                        verification = execute(
-                            verification_command,
-                            progress=progress,
-                            log_path=verification_log,
-                            on_started=lambda pid: record_active_run(
-                                settings.state_dir, verification_id, source, "cryptcheck", pid, verification_log
-                            ),
-                        )
-                    except RunCancelled as cancellation:
-                        persist_run(
-                            settings.state_dir,
-                            verification_id,
-                            source,
-                            verification_command,
-                            cancellation.result,
-                            phase="cryptcheck",
-                            cancelled=True,
-                        )
-                        print(f"{operation} cancelled by user.", file=sys.stderr)
-                        return CANCELLED_RETURN_CODE
-                    finally:
-                        clear_active_run(settings.state_dir)
-                    persist_run(settings.state_dir, verification_id, source, verification_command, verification, phase="cryptcheck")
-                    if verification.returncode:
-                        send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
-                        return verification.returncode
+                if returncode:
+                    first_error = first_error or returncode
+                else:
+                    completed.append(source.name)
+            if first_error:
+                if completed:
+                    send(f"{operation} complete", ", ".join(completed))
+                return first_error
     except AlreadyRunning as error:
         send(f"{operation} skipped", str(error))
         print(error, file=sys.stderr)
@@ -232,6 +206,76 @@ def run_transfer(
         return 2
     send(f"{operation} complete", ", ".join(source.name for source in sources))
     return 0
+
+
+def transfer_source(
+    settings: Settings,
+    identifier: str,
+    source: Source,
+    command: list[str],
+    verification_command: list[str],
+    *,
+    phase: str,
+    operation: str,
+    dry_run: bool,
+    progress: bool,
+) -> int:
+    """Run one source's transfer; its failure must not stop the other sources."""
+    try:
+        validate_source(source)
+        copy_log = run_log_path(settings.state_dir, identifier, source)
+        try:
+            result = execute(
+                command,
+                progress=progress,
+                log_path=copy_log,
+                on_started=lambda pid: record_active_run(settings.state_dir, identifier, source, phase, pid, copy_log),
+            )
+        except RunCancelled as cancellation:
+            persist_run(settings.state_dir, identifier, source, command, cancellation.result, phase=phase, cancelled=True)
+            print(f"{operation} cancelled by user.", file=sys.stderr)
+            return CANCELLED_RETURN_CODE
+        finally:
+            clear_active_run(settings.state_dir)
+        persist_run(settings.state_dir, identifier, source, command, result, phase=phase)
+        if result.returncode:
+            send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
+            return result.returncode
+        if settings.verify and not dry_run:
+            verification_id = identifier + "-check"
+            verification_log = run_log_path(settings.state_dir, verification_id, source)
+            try:
+                verification = execute(
+                    verification_command,
+                    progress=progress,
+                    log_path=verification_log,
+                    on_started=lambda pid: record_active_run(
+                        settings.state_dir, verification_id, source, "cryptcheck", pid, verification_log
+                    ),
+                )
+            except RunCancelled as cancellation:
+                persist_run(
+                    settings.state_dir,
+                    verification_id,
+                    source,
+                    verification_command,
+                    cancellation.result,
+                    phase="cryptcheck",
+                    cancelled=True,
+                )
+                print(f"{operation} cancelled by user.", file=sys.stderr)
+                return CANCELLED_RETURN_CODE
+            finally:
+                clear_active_run(settings.state_dir)
+            persist_run(settings.state_dir, verification_id, source, verification_command, verification, phase="cryptcheck")
+            if verification.returncode:
+                send(f"{operation} completed with errors", f"{source.name}: See obu logs for details.", urgent=True)
+                return verification.returncode
+        return 0
+    except BackupError as error:
+        send(f"{operation} could not start", f"{source.name}: {error}", urgent=True)
+        print(f"{source.name}: {error}", file=sys.stderr)
+        return 2
 
 
 def persist_run(

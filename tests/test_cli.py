@@ -33,43 +33,89 @@ filters = ["common", "primary"]
 rules = ["- **/.cache/**", "- **/*.tmp"]
 
 [filters.primary]
-rules = [
-    "- /Downloads/rebuildable/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
-    "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
-    "- **/.config/Element/Cache/**",
-    "- **/.config/Element/GPUCache/**",
-    "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
-    "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
-    "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
-    "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
-    "- **/.config/t3code/**/Cache/**",
-    "- **/.config/t3code/**/Code Cache/**",
-    "- **/.config/t3code/**/GPUCache/**",
-    "- **/.config/t3code/**/DawnGraphiteCache/**",
-    "- **/.config/t3code/**/DawnWebGPUCache/**",
-    "- **/.config/t3code/**/DIPS-wal",
-    "- **/.local/share/gvfs-metadata/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
-    "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-    "- **/.config/t3code/Cache/**",
-    "- **/.config/t3code/GPUCache/**",
-    "- **/.config/t3code/DawnGraphiteCache/**",
-    "- **/.config/t3code/DawnWebGPUCache/**",
-    "- **/.config/t3code/DIPS-wal",
-]
+        rules = [
+            "- /Downloads/rebuildable/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
+            "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
+            "- **/CdmStorage.db",
+            "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
+            "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
+            "- **/BraveSoftware/Brave-Browser/**/History-journal",
+            "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
+            "- **/DIPS-wal",
+            "- **/.config/1Password/1password.sqlite-wal",
+            "- **/.config/1Password/1password.sqlite-shm",
+            "- **/.config/1Password/Partitions/**/Session Storage/**",
+            "- **/.config/Element/Cache/**",
+            "- **/.config/Element/GPUCache/**",
+            "- **/.config/Element/DawnGraphiteCache/**",
+            "- **/.config/Element/DawnWebGPUCache/**",
+            "- **/.config/Element/IndexedDB/**",
+            "- **/.config/Element/WebStorage/QuotaManager*",
+            "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
+            "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
+            "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
+            "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
+            "- **/.local/share/gvfs-metadata/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
+            "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
+            "- **/.config/t3code/Cache/**",
+            "- **/.config/t3code/GPUCache/**",
+            "- **/.config/t3code/DawnGraphiteCache/**",
+            "- **/.config/t3code/DawnWebGPUCache/**",
+            "- **/.config/t3code/IndexedDB/**",
+            "- **/.config/t3code/Local Storage/**",
+            "- **/.config/t3code/WebStorage/**",
+            "- **/.thunderbird/**/datareporting/**",
+            "- .local/share/recently-used.xbel",
+        ]
 """.format(state=tmp_path / "state")
     )
     return config
+
+
+def write_two_source_config(tmp_path: Path, primary: Path, secondary: Path) -> Path:
+    config = write_config(tmp_path)
+    config.write_text(
+        config.read_text()
+        .replace('path = "/data/primary"', f'path = "{primary}"')
+        .replace(
+            "[filters.common]",
+            f'[sources.secondary]\npath = "{secondary}"\nfilters = ["common"]\n\n[filters.common]',
+        )
+    )
+    return config
+
+
+def stub_rclone_environment(temporary: Path, rclone_script: str) -> dict[str, str]:
+    rclone = temporary / "rclone"
+    rclone.write_text(f"#!/bin/sh\n{rclone_script}")
+    rclone.chmod(0o700)
+    notify_send = temporary / "notify-send"
+    notify_send.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$OBU_TEST_NOTIFICATION\"\n")
+    notify_send.chmod(0o700)
+    return os.environ | {
+        "PYTHONPATH": str(ROOT / "src"),
+        "PATH": f"{temporary}:{os.environ['PATH']}",
+        "OBU_TEST_NOTIFICATION": str(temporary / "notification"),
+    }
+
+
+def run_returncodes(runs: Path, source: str) -> dict[str, list[int]]:
+    phases: dict[str, list[int]] = {}
+    for path in runs.glob(f"*-{source}.json"):
+        record = json.loads(path.read_text())
+        phases.setdefault(str(record["phase"]), []).append(int(record["returncode"]))
+    return phases
 
 
 class BackupCliTests(unittest.TestCase):
@@ -156,18 +202,25 @@ class BackupCliTests(unittest.TestCase):
                 "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
                 "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
                 "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
+                "- **/CdmStorage.db",
+                "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
+                "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
+                "- **/BraveSoftware/Brave-Browser/**/History-journal",
+                "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
+                "- **/DIPS-wal",
+                "- **/.config/1Password/1password.sqlite-wal",
+                "- **/.config/1Password/1password.sqlite-shm",
+                "- **/.config/1Password/Partitions/**/Session Storage/**",
                 "- **/.config/Element/Cache/**",
                 "- **/.config/Element/GPUCache/**",
+                "- **/.config/Element/DawnGraphiteCache/**",
+                "- **/.config/Element/DawnWebGPUCache/**",
+                "- **/.config/Element/IndexedDB/**",
+                "- **/.config/Element/WebStorage/QuotaManager*",
                 "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
                 "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
                 "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
                 "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
-                "- **/.config/t3code/**/Cache/**",
-                "- **/.config/t3code/**/Code Cache/**",
-                "- **/.config/t3code/**/GPUCache/**",
-                "- **/.config/t3code/**/DawnGraphiteCache/**",
-                "- **/.config/t3code/**/DawnWebGPUCache/**",
-                "- **/.config/t3code/**/DIPS-wal",
                 "- **/.local/share/gvfs-metadata/**",
                 "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
                 "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
@@ -180,7 +233,11 @@ class BackupCliTests(unittest.TestCase):
                 "- **/.config/t3code/GPUCache/**",
                 "- **/.config/t3code/DawnGraphiteCache/**",
                 "- **/.config/t3code/DawnWebGPUCache/**",
-                "- **/.config/t3code/DIPS-wal",
+                "- **/.config/t3code/IndexedDB/**",
+                "- **/.config/t3code/Local Storage/**",
+                "- **/.config/t3code/WebStorage/**",
+                "- **/.thunderbird/**/datareporting/**",
+                "- .local/share/recently-used.xbel",
             ],
         )
 
@@ -213,6 +270,19 @@ class BackupCliTests(unittest.TestCase):
             if item == "--filter"
         ]
         expected = {
+            "- **/CdmStorage.db",
+            "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
+            "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
+            "- **/BraveSoftware/Brave-Browser/**/History-journal",
+            "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
+            "- **/DIPS-wal",
+            "- **/.config/1Password/1password.sqlite-wal",
+            "- **/.config/1Password/1password.sqlite-shm",
+            "- **/.config/1Password/Partitions/**/Session Storage/**",
+            "- **/.config/Element/DawnGraphiteCache/**",
+            "- **/.config/Element/DawnWebGPUCache/**",
+            "- **/.config/Element/IndexedDB/**",
+            "- **/.config/Element/WebStorage/QuotaManager*",
             "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
@@ -224,7 +294,11 @@ class BackupCliTests(unittest.TestCase):
             "- **/.config/t3code/GPUCache/**",
             "- **/.config/t3code/DawnGraphiteCache/**",
             "- **/.config/t3code/DawnWebGPUCache/**",
-            "- **/.config/t3code/DIPS-wal",
+            "- **/.config/t3code/IndexedDB/**",
+            "- **/.config/t3code/Local Storage/**",
+            "- **/.config/t3code/WebStorage/**",
+            "- **/.thunderbird/**/datareporting/**",
+            "- .local/share/recently-used.xbel",
         }
         self.assertTrue(expected.issubset(copy_filters))
         self.assertTrue(expected.issubset(check_filters))
@@ -250,6 +324,151 @@ class BackupCliTests(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_all_prints_one_plan_per_configured_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_two_source_config(temporary, Path("/data/primary"), Path("/data/secondary"))
+            result = self.run_cli(config, "all", "--print-command")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plans = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([plan["source"] for plan in plans], ["primary", "secondary"])
+        self.assertEqual(plans[0]["command"][2:4], ["/data/primary", "obu-crypt:hosts/test-host/primary/current"])
+        self.assertEqual(plans[1]["command"][2:4], ["/data/secondary", "obu-crypt:hosts/test-host/secondary/current"])
+        self.assertEqual(plans[1]["verification_command"][1], "cryptcheck")
+        self.assertIn("--one-way", plans[1]["verification_command"])
+
+    def test_all_backs_up_remaining_sources_when_one_copy_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            primary = temporary / "primary"
+            secondary = temporary / "secondary"
+            primary.mkdir()
+            secondary.mkdir()
+            config = write_two_source_config(temporary, primary, secondary)
+            environment = stub_rclone_environment(
+                temporary,
+                f'if [ "$2" = "{primary}" ]; then printf \'%s\\n\' \'rclone: opaque, unpleasant transfer error details\' >&2; exit 7; fi\n'
+                "exit 0\n",
+            )
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "all"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            runs = temporary / "state" / "runs"
+            primary_phases = run_returncodes(runs, "primary")
+            secondary_phases = run_returncodes(runs, "secondary")
+            notification_lines = (temporary / "notification").read_text().splitlines()
+
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(primary_phases, {"copy": [7]})
+        self.assertEqual(secondary_phases, {"copy": [0], "cryptcheck": [0]})
+        self.assertIn("Backup completed with errors", notification_lines)
+        self.assertIn("primary: See obu logs for details.", notification_lines)
+        self.assertIn("critical", notification_lines)
+        self.assertIn("Backup complete", notification_lines)
+        self.assertIn("secondary", notification_lines)
+
+    def test_all_backs_up_remaining_sources_when_one_verification_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            primary = temporary / "primary"
+            secondary = temporary / "secondary"
+            primary.mkdir()
+            secondary.mkdir()
+            config = write_two_source_config(temporary, primary, secondary)
+            environment = stub_rclone_environment(
+                temporary,
+                f'if [ "$1" = cryptcheck ] && [ "$2" = "{primary}" ]; then printf \'%s\\n\' \'rclone: opaque, unpleasant verification error details\' >&2; exit 8; fi\n'
+                "exit 0\n",
+            )
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "all"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            runs = temporary / "state" / "runs"
+            primary_phases = run_returncodes(runs, "primary")
+            secondary_phases = run_returncodes(runs, "secondary")
+            notification_lines = (temporary / "notification").read_text().splitlines()
+
+        self.assertEqual(result.returncode, 8, result.stderr)
+        self.assertEqual(primary_phases, {"copy": [0], "cryptcheck": [8]})
+        self.assertEqual(secondary_phases, {"copy": [0], "cryptcheck": [0]})
+        self.assertIn("Backup completed with errors", notification_lines)
+        self.assertIn("primary: See obu logs for details.", notification_lines)
+        self.assertIn("critical", notification_lines)
+        self.assertIn("Backup complete", notification_lines)
+        self.assertIn("secondary", notification_lines)
+
+    def test_all_backs_up_remaining_sources_when_one_source_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            primary = temporary / "missing"
+            secondary = temporary / "secondary"
+            secondary.mkdir()
+            config = write_two_source_config(temporary, primary, secondary)
+            environment = stub_rclone_environment(temporary, "exit 0\n")
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "all"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            runs = temporary / "state" / "runs"
+            primary_phases = run_returncodes(runs, "primary")
+            secondary_phases = run_returncodes(runs, "secondary")
+            notification_lines = (temporary / "notification").read_text().splitlines()
+            unavailable = f"primary: source is not an available directory: {primary}"
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(primary_phases, {})
+        self.assertEqual(secondary_phases, {"copy": [0], "cryptcheck": [0]})
+        self.assertIn("Backup could not start", notification_lines)
+        self.assertIn(unavailable, notification_lines)
+        self.assertIn(unavailable, result.stderr)
+        self.assertIn("Backup complete", notification_lines)
+        self.assertIn("secondary", notification_lines)
+
+    def test_all_notifies_once_with_every_source_when_all_succeed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            primary = temporary / "primary"
+            secondary = temporary / "secondary"
+            primary.mkdir()
+            secondary.mkdir()
+            config = write_two_source_config(temporary, primary, secondary)
+            environment = stub_rclone_environment(temporary, "exit 0\n")
+            result = subprocess.run(
+                [sys.executable, "-m", "obu", "--config", str(config), "all"],
+                cwd=ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            runs = temporary / "state" / "runs"
+            primary_phases = run_returncodes(runs, "primary")
+            secondary_phases = run_returncodes(runs, "secondary")
+            notification_lines = (temporary / "notification").read_text().splitlines()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(primary_phases, {"copy": [0], "cryptcheck": [0]})
+        self.assertEqual(secondary_phases, {"copy": [0], "cryptcheck": [0]})
+        self.assertEqual(
+            notification_lines,
+            ["--app-name", "OBU Backup", "Backup complete", "primary, secondary"],
+        )
 
     def test_tertiary_photo_library_source_excludes_its_live_container_from_secondary(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

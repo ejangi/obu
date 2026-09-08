@@ -91,7 +91,7 @@ make integration-wallpapers
 
 It restores only that encrypted subtree to a newly-created `/tmp/obu-restore-*` directory, runs `rclone check --one-way --links` against `/mnt/storage/Wallpapers`, and removes the temporary directory afterwards. Run `python3 tests/integration_restore_check.py --keep-temp` when inspection is needed.
 
-Backups use `rclone copy`, never automatic remote deletion. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
+Backups use `rclone copy`, never automatic remote deletion. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. Scheduled `all` runs continue past a failing source — an unavailable drive, a failed copy, or a failed cryptcheck is recorded and notified for that source alone — so one drive never blocks the others, and the run still exits nonzero whenever any source failed. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
 
 To make a remote current tree match a source and remove paths now excluded by its filters, use the explicit `sync` command. It uses `rclone sync --delete-excluded`, so always review the plan and dry run before performing it:
 
