@@ -33,51 +33,7 @@ filters = ["common", "primary"]
 rules = ["- **/.cache/**", "- **/*.tmp"]
 
 [filters.primary]
-        rules = [
-            "- /Downloads/rebuildable/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
-            "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
-            "- **/CdmStorage.db",
-            "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
-            "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
-            "- **/BraveSoftware/Brave-Browser/**/History-journal",
-            "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
-            "- **/DIPS-wal",
-            "- **/.config/1Password/1password.sqlite-wal",
-            "- **/.config/1Password/1password.sqlite-shm",
-            "- **/.config/1Password/Partitions/**/Session Storage/**",
-            "- **/.config/Element/Cache/**",
-            "- **/.config/Element/GPUCache/**",
-            "- **/.config/Element/DawnGraphiteCache/**",
-            "- **/.config/Element/DawnWebGPUCache/**",
-            "- **/.config/Element/IndexedDB/**",
-            "- **/.config/Element/WebStorage/QuotaManager*",
-            "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
-            "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
-            "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
-            "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
-            "- **/.local/share/gvfs-metadata/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-            "- **/.config/t3code*/Cache/**",
-            "- **/.config/t3code*/GPUCache/**",
-            "- **/.config/t3code*/DawnGraphiteCache/**",
-            "- **/.config/t3code*/DawnWebGPUCache/**",
-            "- **/.config/t3code/IndexedDB/**",
-            "- **/.config/t3code/Local Storage/**",
-            "- **/.config/t3code/WebStorage/**",
-            "- **/.thunderbird/**/datareporting/**",
-            "- .local/share/recently-used.xbel",
-        ]
+rules = ["- /Downloads/rebuildable/**", "- GPUCache/**", "- Dawn*Cache/**"]
 """.format(state=tmp_path / "state")
     )
     return config
@@ -192,53 +148,7 @@ class BackupCliTests(unittest.TestCase):
         self.assertNotIn("--filter-from", command)
         self.assertEqual(
             [command[index + 1] for index, item in enumerate(command) if item == "--filter"],
-            [
-                "- **/.cache/**",
-                "- **/*.tmp",
-                "- /Downloads/rebuildable/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Cache/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Code Cache/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/GPUCache/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/DawnGraphiteCache/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/DawnWebGPUCache/**",
-                "- **/.config/BraveSoftware/Brave-Browser/Safe Browsing/**",
-                "- **/CdmStorage.db",
-                "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
-                "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
-                "- **/BraveSoftware/Brave-Browser/**/History-journal",
-                "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
-                "- **/DIPS-wal",
-                "- **/.config/1Password/1password.sqlite-wal",
-                "- **/.config/1Password/1password.sqlite-shm",
-                "- **/.config/1Password/Partitions/**/Session Storage/**",
-                "- **/.config/Element/Cache/**",
-                "- **/.config/Element/GPUCache/**",
-                "- **/.config/Element/DawnGraphiteCache/**",
-                "- **/.config/Element/DawnWebGPUCache/**",
-                "- **/.config/Element/IndexedDB/**",
-                "- **/.config/Element/WebStorage/QuotaManager*",
-                "- **/.var/app/org.signal.Signal/config/Signal/GPUCache/**",
-                "- **/.var/app/org.signal.Signal/config/Signal/DawnGraphiteCache/**",
-                "- **/.var/app/org.signal.Signal/config/Signal/DawnWebGPUCache/**",
-                "- **/.var/app/org.signal.Signal/config/Signal/sql/db.sqlite-shm",
-                "- **/.local/share/gvfs-metadata/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
-                "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-                "- **/.config/t3code*/Cache/**",
-                "- **/.config/t3code*/GPUCache/**",
-                "- **/.config/t3code*/DawnGraphiteCache/**",
-                "- **/.config/t3code*/DawnWebGPUCache/**",
-                "- **/.config/t3code/IndexedDB/**",
-                "- **/.config/t3code/Local Storage/**",
-                "- **/.config/t3code/WebStorage/**",
-                "- **/.thunderbird/**/datareporting/**",
-                "- .local/share/recently-used.xbel",
-            ],
+            ["- **/.cache/**", "- **/*.tmp", "- /Downloads/rebuildable/**", "- GPUCache/**", "- Dawn*Cache/**"],
         )
 
     def test_sync_plan_deletes_currently_excluded_destination_files(self) -> None:
@@ -269,37 +179,7 @@ class BackupCliTests(unittest.TestCase):
             for index, item in enumerate(plan["verification_command"])
             if item == "--filter"
         ]
-        expected = {
-            "- **/CdmStorage.db",
-            "- **/BraveSoftware/Brave-Browser/component_crx_cache/**",
-            "- **/BraveSoftware/Brave-Browser/[a-p][a-p][a-p][a-p]*/**",
-            "- **/BraveSoftware/Brave-Browser/**/History-journal",
-            "- **/BraveSoftware/Brave-Browser/**/adblock_cache/**",
-            "- **/DIPS-wal",
-            "- **/.config/1Password/1password.sqlite-wal",
-            "- **/.config/1Password/1password.sqlite-shm",
-            "- **/.config/1Password/Partitions/**/Session Storage/**",
-            "- **/.config/Element/DawnGraphiteCache/**",
-            "- **/.config/Element/DawnWebGPUCache/**",
-            "- **/.config/Element/IndexedDB/**",
-            "- **/.config/Element/WebStorage/QuotaManager*",
-            "- **/.config/BraveSoftware/Brave-Browser/**/IndexedDB/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Local Extension Settings/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Local Storage/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Session Storage/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
-            "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-            "- **/.config/t3code*/Cache/**",
-            "- **/.config/t3code*/GPUCache/**",
-            "- **/.config/t3code*/DawnGraphiteCache/**",
-            "- **/.config/t3code*/DawnWebGPUCache/**",
-            "- **/.config/t3code/IndexedDB/**",
-            "- **/.config/t3code/Local Storage/**",
-            "- **/.config/t3code/WebStorage/**",
-            "- **/.thunderbird/**/datareporting/**",
-            "- .local/share/recently-used.xbel",
-        }
+        expected = {"- GPUCache/**", "- Dawn*Cache/**"}
         self.assertTrue(expected.issubset(copy_filters))
         self.assertTrue(expected.issubset(check_filters))
 
@@ -308,20 +188,16 @@ class BackupCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         plan = json.loads(result.stdout)
         expected = {
-            "- **/.thunderbird/**/folderCache.json",
-            "- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache/**",
-            "- **/.config/t3code*/Cache/**",
-            "- **/.config/t3code*/Code Cache/**",
-            "- **/.config/t3code*/GPUCache/**",
-            "- **/.config/t3code*/DawnGraphiteCache/**",
-            "- **/.config/t3code*/DawnWebGPUCache/**",
+            "- Cache/**", "- Code Cache/**", "- GPUCache/**",
+            "- Dawn*Cache/**", "- htmlcache/**", "- folderCache.json",
         }
         for key in ("command", "verification_command"):
             command = plan[key]
             rules = {command[i + 1] for i, value in enumerate(command) if value == "--filter"}
             self.assertTrue(expected.issubset(rules), expected - rules)
-            self.assertNotIn("- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/userdata/**", rules)
-            self.assertNotIn("- **/.thunderbird/**/ImapMail/**", rules)
+            self.assertNotIn("- **/IndexedDB/**", rules)
+            self.assertNotIn("- **/Local Storage/**", rules)
+            self.assertFalse(any("/.config/" in rule or "/.var/" in rule for rule in rules))
 
     def test_sync_runs_with_a_standard_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -515,8 +391,8 @@ rules = ["- /Photos/photo-library.luks"]
 [filters.tertiary]
 rules = [
     "- /lost+found/**",
-    "- /immich/model-cache/**",
-    "- /immich/postgres/**",
+    "- /services/model-cache/**",
+    "- /services/database/**",
 ]
 """
             )
@@ -537,8 +413,8 @@ rules = [
             [tertiary_plan["command"][index + 1] for index, item in enumerate(tertiary_plan["command"]) if item == "--filter"][-3:],
             [
                 "- /lost+found/**",
-                "- /immich/model-cache/**",
-                "- /immich/postgres/**",
+                "- /services/model-cache/**",
+                "- /services/database/**",
             ],
         )
 

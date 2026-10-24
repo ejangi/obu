@@ -27,6 +27,14 @@ filters = ["common", "tertiary", "vm_images"]
 # specific re-inclusions above an exclusion that would otherwise match them.
 [filters.common]
 rules = [
+  # Disposable cache directories/files at any depth. These apply by name;
+  # databases, mail, and persistent application storage need separate review.
+  "- Cache/**",
+  "- Code Cache/**",
+  "- GPUCache/**",
+  "- Dawn*Cache/**",
+  "- htmlcache/**",
+  "- folderCache.json",
   "- **/.local/state/obu/**",
   "- .DS_Store",
   "- Thumbs.db",
@@ -41,34 +49,24 @@ rules = [
 
 [filters.primary]
 rules = [
-  # Regenerable caches change while applications run; keep mail and Steam settings.
-  "- **/.thunderbird/**/folderCache.json",
-  "- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache/**",
-  # Match rendering/browser caches in both t3code and t3code-v2.
-  "- **/.config/t3code*/Cache/**",
-  "- **/.config/t3code*/Code Cache/**",
-  "- **/.config/t3code*/GPUCache/**",
-  "- **/.config/t3code*/DawnGraphiteCache/**",
-  "- **/.config/t3code*/DawnWebGPUCache/**",
-  # "- /Downloads/rebuildable/**",
+  # Add source-specific exclusions here after reviewing what can be recreated.
   "- /lost+found/**",
 ]
 
 [filters.secondary]
 rules = [
-  # Back up the unlocked photo filesystem above, never this live LUKS container.
   # "- /Scratch/**",
   "- /lost+found/**",
 ]
 
 [filters.tertiary]
 rules = [
-  # Exclude unreadable service/system directories from the mounted photo filesystem.
+  # Exclude filesystem recovery metadata.
   "- /lost+found/**",
 ]
 
 # Probe matching images wherever they occur in a selected source. A failed
-# QEMU lock/access check temporarily excludes only that image for this run.
+# image lock/access check temporarily excludes only that image for this run.
 # Broad .img/.raw extensions can also match non-VM disk images; edit as needed.
 [filters.vm_images]
 vm_image_extensions = [".qcow", ".qcow2", ".qed", ".vmdk", ".vdi", ".vhd", ".vhdx", ".img", ".raw"]

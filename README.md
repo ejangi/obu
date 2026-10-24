@@ -49,7 +49,7 @@ The timer uses the `schedule` systemd `OnCalendar` expression from `config.toml`
 
 ## Operations
 
-Run one configured source with `./obu backup primary`; this checkout also uses `secondary` for `/mnt/storage` and `tertiary` for the unlocked `/mnt/Photos` filesystem. `secondary` explicitly excludes `/Photos/photo-library.luks`, so the live encrypted container is not copied while Immich uses it. Run `./obu status` to see each configured source's latest full copy and verification results, last successful full verification, and recent actionable errors. Scoped backups do not count as full-drive verification. Records remain in `~/.local/state/obu/runs/`.
+Run one configured source with `./obu backup primary`. Name additional configured drives `secondary`, `tertiary`, and so on. Run `./obu status` to see each configured source's latest full copy and verification results, last successful full verification, and recent actionable errors. Scoped backups do not count as full-drive verification. Records remain in `~/.local/state/obu/runs/`.
 
 While OBU has started rclone itself, `status` also reports the active source, phase (`copy` or `cryptcheck`), PID, start time, and the latest one-line rclone statistic from its private live log. Statistics update every 30 seconds. If a crash leaves an active marker for a dead process, `status` flags it; the next safely locked backup archives that marker as a `.stale` record before starting.
 
@@ -93,7 +93,9 @@ It restores only that encrypted subtree to a newly-created `/tmp/obu-restore-*` 
 
 Backups use `rclone copy`, never automatic remote deletion. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. Scheduled `all` runs continue past a failing source — an unavailable drive, a failed copy, or a failed cryptcheck is recorded and notified for that source alone — so one drive never blocks the others, and the run still exits nonzero whenever any source failed. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
 
-For files that applications keep changing, exclude only disposable caches in the named TOML filter groups. The example includes Thunderbird's folder cache, Flatpak Steam's browser cache, and T3 Code's rendering caches (`t3code*` matches both directory names). Mail and Steam settings remain included. Close applications that write important data during the copy **and** verification, or arrange a filesystem snapshot as the source; OBU does not create snapshots or stop applications automatically. Cache exclusions cannot guarantee consistency for live databases or mail.
+For files that applications keep changing, exclude only disposable caches in the named TOML filter groups. The example uses generic names such as `GPUCache/**` and `Dawn*Cache/**`, matching cache directories at any depth. These deliberately apply to every matching directory, regardless of its application; review the list before using it. Databases, mail, and persistent storage are not generic caches: keep exclusions for them narrowly scoped in your private `config.toml`. Close applications that write important data during the copy **and** verification, or arrange a filesystem snapshot as the source; OBU does not create snapshots or stop applications automatically.
+
+Keep computer-specific paths and application choices in `config.toml`, which Git ignores. The example configuration and test fixtures use generic paths.
 
 VM image handling is configured by extension in a reusable filter group, selected in each source's `filters` list:
 
