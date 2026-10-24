@@ -49,7 +49,7 @@ The timer uses the `schedule` systemd `OnCalendar` expression from `config.toml`
 
 ## Operations
 
-Run one configured source with `./obu backup primary`; this checkout also uses `secondary` for `/mnt/storage` and `tertiary` for the unlocked `/mnt/Photos` filesystem. `secondary` explicitly excludes `/Photos/photo-library.luks`, so the live encrypted container is not copied while Immich uses it. Run `./obu status` to read the last recorded runs in `~/.local/state/obu/runs/`.
+Run one configured source with `./obu backup primary`; this checkout also uses `secondary` for `/mnt/storage` and `tertiary` for the unlocked `/mnt/Photos` filesystem. `secondary` explicitly excludes `/Photos/photo-library.luks`, so the live encrypted container is not copied while Immich uses it. Run `./obu status` to see each configured source's latest full copy and verification results, last successful full verification, and recent actionable errors. Scoped backups do not count as full-drive verification. Records remain in `~/.local/state/obu/runs/`.
 
 While OBU has started rclone itself, `status` also reports the active source, phase (`copy` or `cryptcheck`), PID, start time, and the latest one-line rclone statistic from its private live log. Statistics update every 30 seconds. If a crash leaves an active marker for a dead process, `status` flags it; the next safely locked backup archives that marker as a `.stale` record before starting.
 
@@ -92,6 +92,22 @@ make integration-wallpapers
 It restores only that encrypted subtree to a newly-created `/tmp/obu-restore-*` directory, runs `rclone check --one-way --links` against `/mnt/storage/Wallpapers`, and removes the temporary directory afterwards. Run `python3 tests/integration_restore_check.py --keep-temp` when inspection is needed.
 
 Backups use `rclone copy`, never automatic remote deletion. Symlinks are preserved without following their targets. A successful transfer is followed by `rclone cryptcheck --one-way`; failures are persisted as private local records with at most 16 KiB of rclone output. Scheduled `all` runs continue past a failing source — an unavailable drive, a failed copy, or a failed cryptcheck is recorded and notified for that source alone — so one drive never blocks the others, and the run still exits nonzero whenever any source failed. When `notify-send` is available, the desktop notification simply says that the backup completed with errors and directs you to `obu logs` for the details.
+
+For files that applications keep changing, exclude only disposable caches in the named TOML filter groups. The example includes Thunderbird's folder cache, Flatpak Steam's browser cache, and T3 Code's rendering caches (`t3code*` matches both directory names). Mail and Steam settings remain included. Close applications that write important data during the copy **and** verification, or arrange a filesystem snapshot as the source; OBU does not create snapshots or stop applications automatically. Cache exclusions cannot guarantee consistency for live databases or mail.
+
+VM image handling is configured by extension in a reusable filter group, selected in each source's `filters` list:
+
+```toml
+[filters.vm_images]
+vm_image_extensions = [".qcow", ".qcow2", ".qed", ".vmdk", ".vdi", ".vhd", ".vhdx", ".img", ".raw"]
+rules = []
+```
+
+No VM names or disk locations are required. Before each source, OBU scans for these extensions (case-insensitively, without following symlinks) and probes each image with `qemu-img info`. An image that passes is included; a lock/access/probe failure skips just that image for the run. Install `qemu-img` to enable these checks; if unavailable, matching images are skipped while other files continue. Edit the extension list to suit the computer; `.img` and `.raw` may include non-VM disk images.
+
+Copy and verification share the same temporary exclusions. Records, `status`, and `--print-command` report skipped paths; those runs do not count as full verification. Ordinary backups retain existing remote images. If any image is skipped during explicit sync, OBU omits `--delete-excluded` for that run to preserve excluded remote files.
+
+The probe uses [QEMU's image locking](https://www.qemu.org/docs/master/tools/qemu-img.html) without `--force-share`. It does not guarantee detection of other hypervisors or disabled locks. An included VM must stay off through copy and verification: the probe does not hold a lock for the backup or create snapshots. Existing timers pick up configuration changes on their next run.
 
 To make a remote current tree match a source and remove paths now excluded by its filters, use the explicit `sync` command. It uses `rclone sync --delete-excluded`, so always review the plan and dry run before performing it:
 

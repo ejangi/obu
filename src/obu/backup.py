@@ -25,6 +25,7 @@ from .activity import clear_active_run, record_active_run, recover_stale_active_
 from .config import Settings, Source
 from .notify import send
 from .sources import scoped, selected
+from .vm import resolve_filters
 
 
 class BackupError(RuntimeError):
@@ -162,19 +163,29 @@ def run_transfer(
     print_command: bool,
 ) -> int:
     identifier = run_id()
-    commands = [
-        (source, command_builder(settings, source, dry_run, progress), check_command(settings, source, progress))
-        for source in sources
-    ]
     if print_command:
-        for source, command, verification_command in commands:
-            print(json.dumps({"source": source.name, "command": command, "verification_command": verification_command}))
+        for original in sources:
+            source = resolve_filters(original)
+            command = command_builder(settings, source, dry_run, progress)
+            plan = {"source": source.name, "command": command, "verification_command": check_command(settings, source, progress)}
+            if source.vm_image_extensions:
+                plan.update(skipped_vm_images=list(source.skipped_vm_images), skip_transfer=source.skip_transfer)
+            print(json.dumps(plan))
         return 0
     try:
         with backup_lock(settings.state_dir):
             completed: list[str] = []
             first_error = 0
-            for source, command, verification_command in commands:
+            for original in sources:
+                source = resolve_filters(original)
+                command = command_builder(settings, source, dry_run, progress)
+                verification_command = check_command(settings, source, progress)
+                if source.skipped_vm_images:
+                    print(f"{source.name}: skipping VM disks this run: {', '.join(source.skipped_vm_images)}", file=sys.stderr)
+                if source.skip_transfer:
+                    persist_run(settings.state_dir, identifier, source, command,
+                                subprocess.CompletedProcess(command, 0, "", "VM disk skipped this run"), phase="skipped")
+                    continue
                 returncode = transfer_source(
                     settings,
                     identifier,
@@ -300,6 +311,8 @@ def persist_run(
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+    if source.skipped_vm_images:
+        record["skipped_vm_images"] = list(source.skipped_vm_images)
     if cancelled:
         record.update({"cancelled": True, "signal": CANCELLED_SIGNAL})
     filename = runs / f"{identifier}-{source.name}.json"

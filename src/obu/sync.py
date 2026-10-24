@@ -15,6 +15,9 @@ def sync_command(settings: Settings, source: Source, dry_run: bool = False, prog
         "rclone", "sync", str(source.path), destination(settings, source), "--delete-excluded",
         "--create-empty-src-dirs", "--links", "--log-level", "ERROR", *LIVE_STATS_FLAGS,
     ]
+    # Never delete a remote VM disk merely because it is active this run.
+    if source.skipped_vm_images:
+        command.remove("--delete-excluded")
     for rule in source.filter_rules:
         command.extend(["--filter", rule])
     if dry_run:

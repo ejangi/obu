@@ -11,17 +11,17 @@ schedule = "*-*-* 02:30:00"
 # Primary drive
 [sources.primary]
 path = "/media/REPLACE_ME/primary"
-filters = ["common", "primary"]
+filters = ["common", "primary", "vm_images"]
 
 # Secondary drive
 [sources.secondary]
 path = "/media/REPLACE_ME/secondary"
-filters = ["common", "secondary"]
+filters = ["common", "secondary", "vm_images"]
 
 # Tertiary drive
 [sources.tertiary]
 path = "/media/REPLACE_ME/tertiary"
-filters = ["common", "tertiary"]
+filters = ["common", "tertiary", "vm_images"]
 
 # Rules use rclone's filter syntax and run in the listed order. Keep any
 # specific re-inclusions above an exclusion that would otherwise match them.
@@ -41,6 +41,15 @@ rules = [
 
 [filters.primary]
 rules = [
+  # Regenerable caches change while applications run; keep mail and Steam settings.
+  "- **/.thunderbird/**/folderCache.json",
+  "- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache/**",
+  # Match rendering/browser caches in both t3code and t3code-v2.
+  "- **/.config/t3code*/Cache/**",
+  "- **/.config/t3code*/Code Cache/**",
+  "- **/.config/t3code*/GPUCache/**",
+  "- **/.config/t3code*/DawnGraphiteCache/**",
+  "- **/.config/t3code*/DawnWebGPUCache/**",
   # "- /Downloads/rebuildable/**",
   "- /lost+found/**",
 ]
@@ -57,3 +66,10 @@ rules = [
   # Exclude unreadable service/system directories from the mounted photo filesystem.
   "- /lost+found/**",
 ]
+
+# Probe matching images wherever they occur in a selected source. A failed
+# QEMU lock/access check temporarily excludes only that image for this run.
+# Broad .img/.raw extensions can also match non-VM disk images; edit as needed.
+[filters.vm_images]
+vm_image_extensions = [".qcow", ".qcow2", ".qed", ".vmdk", ".vdi", ".vhd", ".vhdx", ".img", ".raw"]
+rules = []

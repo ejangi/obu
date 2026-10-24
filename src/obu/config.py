@@ -18,6 +18,9 @@ class Source:
     path: Path
     filter_rules: tuple[str, ...]
     relative_path: Path = Path(".")
+    vm_image_extensions: tuple[str, ...] = ()
+    skipped_vm_images: tuple[str, ...] = ()
+    skip_transfer: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,12 +54,22 @@ def load_settings(filename: Path) -> Settings:
     if not isinstance(filter_table, dict):
         raise ConfigError("[filters] must contain named filter groups")
     filter_groups: dict[str, tuple[str, ...]] = {}
+    image_extensions: dict[str, tuple[str, ...]] = {}
     for name, values in filter_table.items():
         if not isinstance(values, dict):
             raise ConfigError(f"filters.{name} must be a table with a rules list")
         rules = values.get("rules")
         if not isinstance(rules, list) or not all(isinstance(rule, str) and rule for rule in rules):
             raise ConfigError(f"filters.{name}.rules must be a list of non-empty rclone filter rules")
+        if "unless_vm_stopped" in values:
+            raise ConfigError(f"filters.{name}: replace VM-name conditions with vm_image_extensions")
+        extensions = values.get("vm_image_extensions", [])
+        if not isinstance(extensions, list) or not all(
+            isinstance(extension, str) and extension.startswith(".")
+            and extension[1:].isalnum() for extension in extensions
+        ):
+            raise ConfigError(f"filters.{name}.vm_image_extensions must be a list of extensions such as .qcow2")
+        image_extensions[name] = tuple(extension.lower() for extension in extensions)
         filter_groups[name] = tuple(rules)
 
     sources: dict[str, Source] = {}
@@ -73,6 +86,7 @@ def load_settings(filename: Path) -> Settings:
             name=name,
             path=Path(values["path"]).expanduser(),
             filter_rules=tuple(rule for group in filters for rule in filter_groups[group]),
+            vm_image_extensions=tuple(dict.fromkeys(extension for group in filters for extension in image_extensions[group])),
         )
 
     state_value = raw.get("state_dir", "~/.local/state/obu")

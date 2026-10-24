@@ -68,10 +68,10 @@ rules = ["- **/.cache/**", "- **/*.tmp"]
             "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-            "- **/.config/t3code/Cache/**",
-            "- **/.config/t3code/GPUCache/**",
-            "- **/.config/t3code/DawnGraphiteCache/**",
-            "- **/.config/t3code/DawnWebGPUCache/**",
+            "- **/.config/t3code*/Cache/**",
+            "- **/.config/t3code*/GPUCache/**",
+            "- **/.config/t3code*/DawnGraphiteCache/**",
+            "- **/.config/t3code*/DawnWebGPUCache/**",
             "- **/.config/t3code/IndexedDB/**",
             "- **/.config/t3code/Local Storage/**",
             "- **/.config/t3code/WebStorage/**",
@@ -229,10 +229,10 @@ class BackupCliTests(unittest.TestCase):
                 "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
                 "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
                 "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-                "- **/.config/t3code/Cache/**",
-                "- **/.config/t3code/GPUCache/**",
-                "- **/.config/t3code/DawnGraphiteCache/**",
-                "- **/.config/t3code/DawnWebGPUCache/**",
+                "- **/.config/t3code*/Cache/**",
+                "- **/.config/t3code*/GPUCache/**",
+                "- **/.config/t3code*/DawnGraphiteCache/**",
+                "- **/.config/t3code*/DawnWebGPUCache/**",
                 "- **/.config/t3code/IndexedDB/**",
                 "- **/.config/t3code/Local Storage/**",
                 "- **/.config/t3code/WebStorage/**",
@@ -290,10 +290,10 @@ class BackupCliTests(unittest.TestCase):
             "- **/.config/BraveSoftware/Brave-Browser/**/Sessions/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/Sync Data/**",
             "- **/.config/BraveSoftware/Brave-Browser/**/WebStorage/**",
-            "- **/.config/t3code/Cache/**",
-            "- **/.config/t3code/GPUCache/**",
-            "- **/.config/t3code/DawnGraphiteCache/**",
-            "- **/.config/t3code/DawnWebGPUCache/**",
+            "- **/.config/t3code*/Cache/**",
+            "- **/.config/t3code*/GPUCache/**",
+            "- **/.config/t3code*/DawnGraphiteCache/**",
+            "- **/.config/t3code*/DawnWebGPUCache/**",
             "- **/.config/t3code/IndexedDB/**",
             "- **/.config/t3code/Local Storage/**",
             "- **/.config/t3code/WebStorage/**",
@@ -302,6 +302,26 @@ class BackupCliTests(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(copy_filters))
         self.assertTrue(expected.issubset(check_filters))
+
+    def test_example_cache_exclusions_apply_to_both_phases(self) -> None:
+        result = self.run_cli(ROOT / "config.example.toml")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        plan = json.loads(result.stdout)
+        expected = {
+            "- **/.thunderbird/**/folderCache.json",
+            "- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache/**",
+            "- **/.config/t3code*/Cache/**",
+            "- **/.config/t3code*/Code Cache/**",
+            "- **/.config/t3code*/GPUCache/**",
+            "- **/.config/t3code*/DawnGraphiteCache/**",
+            "- **/.config/t3code*/DawnWebGPUCache/**",
+        }
+        for key in ("command", "verification_command"):
+            command = plan[key]
+            rules = {command[i + 1] for i, value in enumerate(command) if value == "--filter"}
+            self.assertTrue(expected.issubset(rules), expected - rules)
+            self.assertNotIn("- **/.var/app/com.valvesoftware.Steam/.local/share/Steam/userdata/**", rules)
+            self.assertNotIn("- **/.thunderbird/**/ImapMail/**", rules)
 
     def test_sync_runs_with_a_standard_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -669,6 +689,72 @@ rules = [
         self.assertNotIn("first line", result.stdout)
         self.assertIn("second line", result.stdout)
         self.assertIn("last line", result.stdout)
+
+    def test_status_summarizes_phases_and_finds_older_verified_full_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_two_source_config(temporary, Path("/data/primary"), Path("/data/secondary"))
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            def record(name: str, phase: str, code: int, finished: str, output: str = "", path: str = "/data/primary") -> None:
+                (runs / f"{name}-primary.json").write_text(json.dumps({
+                    "source": "primary", "phase": phase, "returncode": code,
+                    "finished_at": finished, "stderr": output,
+                    "command": ["rclone", phase, path, "obu-crypt:hosts/test-host/primary/current"],
+                }))
+            record("old", "cryptcheck", 0, "2026-01-01T01:00:00+00:00")
+            record("scoped", "cryptcheck", 0, "2026-01-03T01:00:00+00:00", path="/data/primary/one-file")
+            record("copy", "copy", 0, "2026-01-04T01:00:00+00:00")
+            record("check", "cryptcheck", 1, "2026-01-04T02:00:00+00:00",
+                   "ERROR : settings: hashes differ\nERROR :           0 B / 0 B, -, 0 B/s, ETA -\n")
+            (runs / "broken.json").write_text("{")
+            (runs / "incomplete.json").write_text("{}")
+            result = self.run_cli(config, "status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("primary", result.stdout)
+        self.assertIn("Copy: succeeded", result.stdout)
+        self.assertIn("Verification: failed", result.stdout)
+        self.assertIn("Last verified full backup: 2026-01-01T01:00:00+00:00", result.stdout)
+        self.assertIn("settings: hashes differ", result.stdout)
+        self.assertNotIn("0 B / 0 B", result.stdout)
+        self.assertIn("secondary", result.stdout)
+        self.assertIn("Last verified full backup: never", result.stdout)
+
+    def test_status_does_not_present_an_old_verification_as_current(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            for phase, finished in (("cryptcheck", "2026-01-01T01:00:00+00:00"), ("copy", "2026-01-02T01:00:00+00:00")):
+                (runs / f"{phase}-primary.json").write_text(json.dumps({
+                    "source": "primary", "phase": phase, "returncode": 0,
+                    "finished_at": finished,
+                    "command": ["rclone", phase, "/data/primary", "obu-crypt:hosts/test-host/primary/current"],
+                }))
+            result = self.run_cli(config, "status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Verification: not completed for latest copy", result.stdout)
+        self.assertIn("Last verified full backup: 2026-01-01", result.stdout)
+
+    def test_status_reads_actionable_errors_from_full_log(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            config = write_config(temporary)
+            runs = temporary / "state" / "runs"
+            runs.mkdir(parents=True)
+            record = runs / "check-primary.json"
+            record.write_text(json.dumps({
+                "source": "primary", "phase": "cryptcheck", "returncode": 1,
+                "finished_at": "2026-01-01T01:00:00+00:00",
+                "command": ["rclone", "cryptcheck", "/data/primary", "obu-crypt:hosts/test-host/primary/current"],
+                "stderr": "ERROR : 0 B / 0 B, ETA -",
+            }))
+            record.with_suffix(".log").write_text("ERROR : important: hashes differ\nERROR : 0 B / 0 B, ETA -\n")
+            result = self.run_cli(config, "status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("important: hashes differ", result.stdout)
+        self.assertNotIn("0 B / 0 B", result.stdout)
 
     def test_status_reports_the_active_rclone_run_and_latest_statistic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
